@@ -2,6 +2,7 @@ from transformers import AutoTokenizer
 import openai
 from pydantic import BaseModel, ValidationError
 from typing import List, Dict, Optional
+import datetime
 
 class ChatBot:
     def __init__(self, model, system=""):
@@ -37,6 +38,11 @@ class ChatBot:
         return completion.choices[0].message.content
     
     def execute(self):
+        current_info = f'''
+Current realtime info:
+- Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
+- Location: Seattle Home Server'''
+        self.system['content'] += current_info
         messages = [self.system]
         messages.extend(self.messages)
         completion = self.get_llm_response(messages=messages, model_name=self.model)
