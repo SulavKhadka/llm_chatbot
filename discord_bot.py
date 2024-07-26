@@ -76,6 +76,22 @@ def split_message(message, limit=2000):
         
         return result
 
+@bot.command(name='new_convo')
+async def new_conversation(ctx):
+    chatbot.messages = []
+    chatbot.messages_token_counts = []
+    chatbot.total_messages_tokens = 0
+    await ctx.send("Conversation history has been cleared. Starting a new conversation!")
+
+@bot.command(name='set_system_msg')
+async def change_system_prompt(ctx, *, new_system_prompt):
+    chatbot.system = {"role": "system", "content": chatbot.system}
+    await ctx.send(f"System prompt has been updated to: '{new_system_prompt}'")
+
+@bot.command(name='system_msg')
+async def get_system_prompt(ctx):
+    await ctx.send(f"System prompt:\n{chatbot.system['content']}")
+
 @bot.event
 async def on_ready():
     print(f'{bot.user} has connected to Discord!')
@@ -85,18 +101,21 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    if message.content.startswith("!"):
+        await bot.process_commands(message)
+        return
+
     response = chatbot(message.content)
     
     # Split the response if it's too long
     if len(response) > 2000:
         parts = split_message(response)
+        print(parts)
         print(f"message too long, split into {len(parts)} parts")
         for part in parts:
             await message.channel.send(part)
     else:
         await message.channel.send(response)
-
-    await bot.process_commands(message)
 
 # Run the bot
 bot.run(DISCORD_BOT_KEY)
