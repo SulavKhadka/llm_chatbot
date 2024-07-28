@@ -6,7 +6,7 @@ import datetime
 import json
 import ast
 import xml.etree.ElementTree as ET
-from function_tools import functions
+from llm_chatbot import function_tools
 
 class ChatBot:
     def __init__(self, model, system=""):
@@ -14,7 +14,7 @@ class ChatBot:
         self.model = model
         self.tokenizer = AutoTokenizer.from_pretrained(model)
         self.max_message_tokens = 16384
-        self.functions = functions
+        self.functions = function_tools.functions
 
         self.purged_messages = []
         self.purged_messages_token_count = []
@@ -37,6 +37,7 @@ class ChatBot:
 
             tool_calls = self._extract_function_calls(completion.choices[0].message.content)
             if len(tool_calls) > 0:
+                print("calling tools")
                 tool_call_responses = []
                 for tool_call in tool_calls:
                     tool_call_responses.append(self._execute_function_call(tool_call))
@@ -55,6 +56,9 @@ class ChatBot:
         self.total_messages_tokens = sum(self.messages_token_counts)
     
     def _extract_function_calls(self, response):
+        if '<tool_call>' not in response:
+            return []
+        
         xml_root_element = f"<root>{response}</root>"
         root = ET.fromstring(xml_root_element)
 

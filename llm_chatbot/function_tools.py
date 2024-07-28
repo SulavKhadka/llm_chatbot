@@ -17,5 +17,5 @@ def get_current_traffic(location: str) -> str:
 
 functions = {
     "get_current_weather": FunctionTool.from_defaults(fn=get_current_weather), 
-    "get_current_traffic": FunctionTool.from_defaults(fn=get_current_weather)
+    "get_current_traffic": FunctionTool.from_defaults(fn=get_current_traffic)
 }
