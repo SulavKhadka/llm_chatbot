@@ -34,6 +34,23 @@ class NomicTextEmbedder:
         encoded_input = self.tokenizer(texts)
         return encoded_input.get('input_ids', [])
 
+    def detokenize(self, token_ids: Union[List[int], List[List[int]]]) -> Union[str, List[str]]:
+        """
+        Convert token IDs back into text.
+
+        Args:
+            token_ids (Union[List[int], List[List[int]]]): Token IDs for a single text or multiple texts.
+
+        Returns:
+            Union[str, List[str]]: Detokenized text(s).
+        """
+        if isinstance(token_ids[0], int):
+            # Single list of token IDs
+            return self.tokenizer.decode(token_ids, skip_special_tokens=True)
+        else:
+            # List of lists of token IDs
+            return [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in token_ids]
+
     @torch.no_grad()
     def embed(self, texts: Union[str, List[str]]) -> List[List[float]]:
         """
