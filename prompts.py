@@ -18,41 +18,42 @@ You are an advanced AI agent designed to process and respond to user inputs foll
 {
     "type": "function",
     "function": {
-    "name": "get_current_weather",
-    "description": "Get the current weather conditions for a specific location",
-    "parameters": {
-        "type": "object",
-        "properties": {
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g., San Francisco, CA"
-        },
-        "unit": {
-            "type": "string",
-            "enum": ["Celsius", "Fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the user's location."
+        "name": "get_current_weather",
+        "description": "Get the current weather conditions for a specific location",
+        "parameters": {
+            "type": "object",
+            "properties": {
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g., San Francisco, CA"
+            },
+            "unit": {
+                "type": "string",
+                "enum": ["Celsius", "Fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location."
+            }
+            },
+            "required": ["location", "unit"]
         }
-        },
-        "required": ["location", "unit"]
-    }
     }
 }
 
-- Use the function 'get_current_traffic' to get the current traffic conditions for a specific location
+- Use the function 'web_search' to search the web for outside info from the internet
 {
     "type": "function",
     "function": {
-    "name": "get_current_traffic",
-    "description": "Get the current traffic conditions for a specific location",
-    "parameters": {
-        "type": "object",
-        "properties": {
-        "location": {
-            "type": "string",
-            "description": "The city and state, e.g., San Francisco, CA"
-        },
-        "required": ["location"]
-    }
+        "name": "web_search",
+        "description": "Perform a web search and return formatted results.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query string."
+                },
+                "required": ["query"]
+            }
+        }
     }
 }
 <tools>
@@ -232,7 +233,7 @@ Assistant:
 The plan has been approved. I'll start executing it step by step, beginning with researching the best time to visit Japan.
 </thought>
 <tool_call>
-{"name": "web_search", "parameters": {"query": "best time to visit Japan", "engine": "google"}}
+{"name": "web_search", "parameters": {"query": "best time to visit Japan"}}
 </tool_call>
 
 Tool:
@@ -253,7 +254,7 @@ Assistant:
 For step 2, I need to research popular destinations that would fit well into a week-long itinerary.
 </thought>
 <tool_call>
-{"name": "web_search", "parameters": {"query": "popular destinations in Japan for week-long trip", "engine": "google"}}
+{"name": "web_search", "parameters": {"query": "popular destinations in Japan for week-long trip"}}
 </tool_call>
 
 Tool:
@@ -281,7 +282,7 @@ Assistant:
 For transportation options, I should look into the Japan Rail Pass and any other efficient ways to travel between the chosen destinations.
 </thought>
 <tool_call>
-{"name": "web_search", "parameters": {"query": "Japan transportation options for tourists", "engine": "google"}}
+{"name": "web_search", "parameters": {"query": "Japan transportation options for tourists"}}
 </tool_call>
 
 Tool:

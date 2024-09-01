@@ -15,6 +15,7 @@ Notes
 - need to add examples of when to use <self_response>, <user_response>, and <plan>
 - what to do with <thoughts>, its helpful for it to analyze before outputting a response but after do we just discard?
 - some <self_response> might just be a little note the LLM is keeping for itself, this should be allowed and handled. maybe we need to show examples of this for it to behave correctly here.
+- omitting tags out of the messages list is bad because it starts following how previous messages of the convo, which if we remove the tags we include in the guideline it will confuse it. hmmmm what to do?
 
 - vllm openAI endpoints
     - `/openapi.json`, Methods: GET, HEAD
