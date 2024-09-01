@@ -2,7 +2,7 @@ import os
 import requests
 import json
 from typing import Dict, List, Any, Optional
-from utils import BRAVE_SEARCH_API_KEY
+from secret_keys import BRAVE_SEARCH_API_KEY
 
 # Configuration
 API_KEY = BRAVE_SEARCH_API_KEY
@@ -87,7 +87,7 @@ def main():
         if query.lower() == 'quit':
             break
 
-        results = web_search(query)
+        results = web_search_api(query)
         formatted_results = format_results(results)
         display_results(formatted_results)
 

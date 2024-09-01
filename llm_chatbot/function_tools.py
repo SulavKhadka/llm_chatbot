@@ -2,7 +2,7 @@ from llama_index.core.tools import FunctionTool
 import requests
 from geopy.geocoders import Nominatim
 from secret_keys import OPENWATHERMAP_API_TOKEN
-from tools.web_search import web_search_api
+from llm_chatbot.tools.web_search import web_search_api
 
 # create an agent
 def get_current_weather(location: str, unit: str) -> str:
