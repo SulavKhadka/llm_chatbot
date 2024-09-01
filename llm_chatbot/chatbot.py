@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 import datetime
 import ast
 import xml.etree.ElementTree as ET
-from llm_chatbot import function_tools
+from llm_chatbot import function_tools, utils
 from secret_keys import TOGETHER_AI_TOKEN
 
 logfire.configure(scrubbing=False) 
@@ -68,9 +68,13 @@ class ChatBot:
         while self_recurse:
             self.rolling_memory()
             completion = self.execute()
-            parsed_resp, parsed_resp_type = self._parse_results(completion.choices[0].message.content)
-            if parsed_resp_type == "TOOL CALL":
-                tool_calls = self._extract_function_calls(completion.choices[0].message.content)
+
+            parsed_response = self._parse_results(completion.choices[0].message.content)
+            
+            llm_thought = f"<thought>\n{parsed_response['thought']}\n</thought>"
+
+            if parsed_response['response']['type'] == "TOOL CALL":
+                tool_calls = parsed_response['response']['response']
                 if len(tool_calls) > 0:
                     self.logger.info(f"Extracted {len(tool_calls)} tool calls")
                     tool_call_responses = []
@@ -81,18 +85,19 @@ class ChatBot:
                     continue
                 else:
                     self_recurse = False
-                    response = completion.choices[0].message.content
+                    response = f"{llm_thought}\n<self_response>\nno tool calls found, continuing on\n</self_response>"
             
-            if parsed_resp_type == "USER_RESPONSE":
+            if parsed_response['response']['type'] == "USER_RESPONSE":
                 self_recurse = False
-                response = parsed_resp
+                response = f"{llm_thought}\n<user_response>\n{parsed_response['response']['response']}\n</user_response>"
 
-            if parsed_resp_type == "SELF_RESPONSE":
-                self._add_message({"role": "assistant", "content": parsed_resp})
+            if parsed_response['response']['type'] == "SELF_RESPONSE":
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<self_response>\n{parsed_response['response']['response']}\n</self_response>"})
                 continue
 
-            if parsed_resp_type == "PLAN":
-                pass
+            if parsed_response['response']['type'] == "PLAN":
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<plan>\n{parsed_response['response']['response']}\n</plan>"})
+                continue
 
         self.logger.info(f"Assistant response: {response}")
         self._add_message({"role": "assistant", "content": response})
@@ -108,38 +113,60 @@ class ChatBot:
 
     def _parse_results(self, response_text: str):
         self.logger.debug(f"parsing the llm response: {response_text}")
+        response_text = utils.sanitize_inner_content(response_text)
         xml_root_element = f"<root>{response_text}</root>"
-        root = ET.fromstring(xml_root_element)
+        
+        try:
+            root = ET.fromstring(xml_root_element)
+        except ET.ParseError:
+            root = utils.ensure_llm_response_format(response_text)
+
+        parsed_resp = {
+            "thought": "",
+            "response": {
+                "type": "",
+                "response": ""
+            }
+        }
 
         thoughts = []
         for element in root.findall(".//thought"):
             thoughts.append(element.text)
+        parsed_resp['thought'] = "\n".join(thoughts).strip()
 
         user_response = ""
         for element in root.findall(".//user_response"):
             user_response += element.text
         if user_response != "":
-            return user_response, "USER_RESPONSE"
+            parsed_resp['response']['type'] = "USER_RESPONSE"
+            parsed_resp['response']['response'] = user_response
+            return parsed_resp 
 
         self_response = ""
         for element in root.findall(".//self_response"):
             self_response += element.text
         if self_response != "":
-            return self_response, "SELF_RESPONSE"
+            parsed_resp['response']['type'] = "SELF_RESPONSE"
+            parsed_resp['response']['response'] = self_response
+            return parsed_resp 
         
         plan = []
         for element in root.findall(".//plan"):
             thoughts.append(element.text)
         if plan != []:
-            return plan, "PLAN"
+            parsed_resp['response']['type'] = "PLAN"
+            parsed_resp['response']['response'] = plan
+            return parsed_resp 
         
         tool_calls = self._extract_function_calls(response_text)
         if tool_calls != []:
-            return tool_calls, "TOOL CALL"
+            parsed_resp['response']['type'] = "TOOL_CALL"
+            parsed_resp['response']['response'] = tool_calls
+            return parsed_resp 
         
-        return response_text, "USER_RESPONSE"
-
-
+        parsed_resp['response']['type'] = "USER_RESPONSE"
+        parsed_resp['response']['response'] = response_text
+        return parsed_resp 
 
     def _extract_function_calls(self, response):
         self.logger.debug(f"Extracting function calls from response: {response}")

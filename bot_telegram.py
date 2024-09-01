@@ -1,11 +1,12 @@
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackContext
 from telegram.constants import ParseMode
-from llm_chatbot import chatbot, function_tools
+from llm_chatbot import chatbot, utils, function_tools
 import re
 from secret_keys import TELEGRAM_BOT_TOKEN
 from prompts import SYS_PROMPT
 from nltk.tokenize import sent_tokenize
+import xml.etree.ElementTree as ET
 
 # Initialize the ChatBot
 chatbot_system_msg = SYS_PROMPT
@@ -92,7 +93,13 @@ async def get_system_prompt(update: Update, context: CallbackContext) -> None:
 async def handle_message(update: Update, context: CallbackContext) -> None:
     user_message = update.message.text
     response = llm_bot(user_message)
+    response = utils.sanitize_inner_content(response)
+    root = ET.fromstring(f"<root>{response}</root>")
     
+    # Extract text from <user_response> tag
+    user_response = root.find('.//user_response')
+    response = user_response.text.strip() if user_response is not None else ""
+
     # Split the response if it's too long
     if len(response) > 4096:  # Telegram message limit
         parts = split_message(response)
