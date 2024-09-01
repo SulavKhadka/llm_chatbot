@@ -9,14 +9,16 @@ import datetime
 import ast
 import xml.etree.ElementTree as ET
 from llm_chatbot import function_tools
+from secret_keys import TOGETHER_AI_TOKEN
 
 logfire.configure(scrubbing=False) 
 
 class ChatBot:
-    def __init__(self, model, system=""):
+    def __init__(self, model, tokenizer_model="", system=""):
         self.system = {"role": "system", "content": system}
         self.model = model
-        self.tokenizer = AutoTokenizer.from_pretrained(model)
+        self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
+        self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
         self.max_message_tokens = 16384
         self.max_reply_msg_tokens = 1536
         self.functions = function_tools.functions
@@ -28,8 +30,8 @@ class ChatBot:
         self.total_messages_tokens = 0
 
         self.openai_client = openai.OpenAI(
-            base_url = "http://0.0.0.0:8000/v1",
-            api_key = "hi",
+            api_key=TOGETHER_AI_TOKEN,
+            base_url="https://api.together.xyz/v1"
         )
 
         # Set up logging
@@ -66,20 +68,32 @@ class ChatBot:
         while self_recurse:
             self.rolling_memory()
             completion = self.execute()
-
-            tool_calls = self._extract_function_calls(completion.choices[0].message.content)
-            if len(tool_calls) > 0:
-                self.logger.info(f"Extracted {len(tool_calls)} tool calls")
-                tool_call_responses = []
-                for tool_call in tool_calls:
-                    tool_call_responses.append(self._execute_function_call(tool_call))
-                tool_response_str = '\n'.join(tool_call_responses)
-                self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_response_str}\n</tool_call_response>"})
-                continue
-            else:
+            parsed_resp, parsed_resp_type = self._parse_results(completion.choices[0].message.content)
+            if parsed_resp_type == "TOOL CALL":
+                tool_calls = self._extract_function_calls(completion.choices[0].message.content)
+                if len(tool_calls) > 0:
+                    self.logger.info(f"Extracted {len(tool_calls)} tool calls")
+                    tool_call_responses = []
+                    for tool_call in tool_calls:
+                        tool_call_responses.append(self._execute_function_call(tool_call))
+                    tool_response_str = '\n'.join(tool_call_responses)
+                    self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_response_str}\n</tool_call_response>"})
+                    continue
+                else:
+                    self_recurse = False
+                    response = completion.choices[0].message.content
+            
+            if parsed_resp_type == "USER_RESPONSE":
                 self_recurse = False
+                response = parsed_resp
 
-        response = completion.choices[0].message.content
+            if parsed_resp_type == "SELF_RESPONSE":
+                self._add_message({"role": "assistant", "content": parsed_resp})
+                continue
+
+            if parsed_resp_type == "PLAN":
+                pass
+
         self.logger.info(f"Assistant response: {response}")
         self._add_message({"role": "assistant", "content": response})
         return response
@@ -91,6 +105,41 @@ class ChatBot:
         self.total_messages_tokens = sum(self.messages_token_counts)
         self.logger.debug(f"Added message: {message}")
         self.logger.debug(f"Message token count: {token_count}, Total tokens: {self.total_messages_tokens}")
+
+    def _parse_results(self, response_text: str):
+        self.logger.debug(f"parsing the llm response: {response_text}")
+        xml_root_element = f"<root>{response_text}</root>"
+        root = ET.fromstring(xml_root_element)
+
+        thoughts = []
+        for element in root.findall(".//thought"):
+            thoughts.append(element.text)
+
+        user_response = ""
+        for element in root.findall(".//user_response"):
+            user_response += element.text
+        if user_response != "":
+            return user_response, "USER_RESPONSE"
+
+        self_response = ""
+        for element in root.findall(".//self_response"):
+            self_response += element.text
+        if self_response != "":
+            return self_response, "SELF_RESPONSE"
+        
+        plan = []
+        for element in root.findall(".//plan"):
+            thoughts.append(element.text)
+        if plan != []:
+            return plan, "PLAN"
+        
+        tool_calls = self._extract_function_calls(response_text)
+        if tool_calls != []:
+            return tool_calls, "TOOL CALL"
+        
+        return response_text, "USER_RESPONSE"
+
+
 
     def _extract_function_calls(self, response):
         self.logger.debug(f"Extracting function calls from response: {response}")
@@ -132,18 +181,21 @@ class ChatBot:
     def _execute_function_call(self, tool_call):
         self.logger.info(f"Executing function call: {tool_call}")
         function_name = tool_call.get("name", None)
-        if function_name is not None:
+        if function_name is not None and function_name in self.functions.keys():
             function_to_call = self.functions.get(function_name, None)
             function_args = tool_call.get("parameters", {})
 
             self.logger.debug(f"Function call details - Name: {function_name}, Args: {function_args}")
-            function_response = function_to_call.call(*function_args.values())
+            try:
+                function_response = function_to_call.call(*function_args.values())
+            except Exception as e:
+                function_response = f"Function call errored out. Error: {e}"
             results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'
             self.logger.debug(f"Function call response: {results_dict}")
             return results_dict
         else:
-            self.logger.warning("Function call executed with no function name")
-            return {}
+            self.logger.warning("Function name is None or invalid")
+            return '{}'
 
     def execute(self):
         current_info = f'''
