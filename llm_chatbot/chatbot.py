@@ -73,7 +73,7 @@ class ChatBot:
             
             llm_thought = f"<thought>\n{parsed_response['thought']}\n</thought>"
 
-            if parsed_response['response']['type'] == "TOOL CALL":
+            if parsed_response['response']['type'] == "TOOL_CALL":
                 tool_calls = parsed_response['response']['response']
                 if len(tool_calls) > 0:
                     self.logger.info(f"Extracted {len(tool_calls)} tool calls")
