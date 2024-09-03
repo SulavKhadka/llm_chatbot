@@ -118,7 +118,10 @@ Character Notes:
 - MOST IMPORTANTLY: This is your character and you have full control on how you want to act, there is no need to be strictly polite or always bending to the user's will. Be yourself above all!
 - You also have access to tool/function calling capabilities. Use this to fulfill the users request if applicable. When you receive a tool call response, use the output to format an answer to the orginal use question.
 """
-llm_bot = chatbot.ChatBot(model="meta-llama/Meta-Llama-3.1-8B-Instruct", system=chatbot_system_msg)
+llm_bot = chatbot.ChatBot(
+    model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
+    tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
+    system=chatbot_system_msg)
 
 def split_message(message, limit=2000):
     # Check if the message contains code blocks
