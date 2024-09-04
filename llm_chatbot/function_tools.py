@@ -3,8 +3,12 @@ import requests
 from geopy.geocoders import Nominatim
 from secret_keys import OPENWATHERMAP_API_TOKEN
 from llm_chatbot.tools.web_search import web_search_api
+from llm_chatbot.tools.python_sandbox import PythonSandbox
+
+llm_sandbox = PythonSandbox("./llm-sandbox-")
 
 # create an agent
+
 def get_current_weather(location: str, unit: str) -> str:
     """
     Fetch current weather data for a given location using the OpenWeatherMap API.
@@ -94,7 +98,6 @@ def web_search(query: str):
                 "description": result.get("description", "")
             })
     return formatted_results
-
 
 def generate_image():
     """Generates an image given a image query"""

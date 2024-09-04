@@ -9,11 +9,13 @@ import xml.etree.ElementTree as ET
 from loguru import logger
 import logfire
 import sys
-from uuid import uuid4
+import psycopg2
+from psycopg2.extras import Json
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import TOGETHER_AI_TOKEN
+from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD
 
 
 # Configure logfire
@@ -35,7 +37,7 @@ logger.add(
 )
 
 class ChatBot:
-    def __init__(self, model, chat_id, tokenizer_model="", system=""):
+    def __init__(self, model, chat_id, tokenizer_model="", system="", db_config=None):
         global logger
         self.chat_id = chat_id
         logger = logger.bind(chat_id=self.chat_id)
@@ -57,6 +59,29 @@ class ChatBot:
             api_key=TOGETHER_AI_TOKEN,
             base_url="https://api.together.xyz/v1"
         )
+
+        if db_config is None:
+            db_config = {
+                "dbname": "chatbot_db",
+                "user": "your_username",
+                "password": POSTGRES_DB_PASSWORD,
+                "host": "localhost",
+                "port": "5432"
+            }
+        
+        # Initialize database if it doesn't exist
+        self.initialize_db(**db_config)
+        
+        # Database connection
+        self.conn = psycopg2.connect(**db_config)
+        self.cur = self.conn.cursor()
+        
+        # Insert new chat session
+        self.cur.execute("""
+            INSERT INTO chat_sessions (chat_id, model, tokenizer_model, system_message)
+            VALUES (%s, %s, %s, %s)
+        """, (self.chat_id, self.model, self.tokenizer_model, system))
+        self.conn.commit()
 
         logger.info({"event": "ChatBot_initialized", "model": model})
         logger.debug({"event": "Initial_system_message", "system_message": self.system})
@@ -104,12 +129,106 @@ class ChatBot:
         self._add_message({"role": "assistant", "content": response})
         return response
 
+    @classmethod
+    def initialize_db(cls, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
+        cls._initialize_database(dbname, user, password, host, port)
+
+    def _initialize_database(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
+        """
+        Initialize the database and create necessary tables if they don't exist.
+        
+        :param dbname: Name of the database
+        :param user: Database user
+        :param password: Database password
+        :param host: Database host (default: 'localhost')
+        :param port: Database port (default: '5432')
+        """
+        # Connect to PostgreSQL server
+        conn = psycopg2.connect(dbname='postgres', user=user, password=password, host=host, port=port)
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cur = conn.cursor()
+
+        # Create database if it doesn't exist
+        cur.execute(f"SELECT 1 FROM pg_catalog.pg_database WHERE datname = '{dbname}'")
+        exists = cur.fetchone()
+        if not exists:
+            cur.execute(f"CREATE DATABASE {dbname}")
+        
+        cur.close()
+        conn.close()
+
+        # Connect to the newly created or existing database
+        conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+        cur = conn.cursor()
+
+        # Create tables
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                chat_id UUID PRIMARY KEY,
+                model VARCHAR(255) NOT NULL,
+                tokenizer_model VARCHAR(255),
+                system_message TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id SERIAL PRIMARY KEY,
+                chat_id UUID REFERENCES chat_sessions(chat_id),
+                role VARCHAR(50) NOT NULL,
+                content TEXT NOT NULL,
+                token_count INTEGER NOT NULL,
+                is_purged BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS function_calls (
+                id SERIAL PRIMARY KEY,
+                chat_id UUID REFERENCES chat_sessions(chat_id),
+                message_id INTEGER REFERENCES chat_messages(id),
+                function_name VARCHAR(255) NOT NULL,
+                parameters JSONB,
+                response TEXT,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Create indexes
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_function_calls_chat_id ON function_calls(chat_id)
+        """)
+
+        # Commit changes and close connection
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        print(f"Database '{dbname}' and tables have been initialized successfully.")
+
     def _add_message(self, message):
         self.messages.append(message)
         token_count = len(self.tokenizer.encode(str(self.messages[-1])))
         self.messages_token_counts.append(token_count)
         self.total_messages_tokens = sum(self.messages_token_counts)
+        
+        self.cur.execute("""
+            INSERT INTO chat_messages (chat_id, role, content, token_count)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (self.chat_id, message['role'], message['content'], token_count))
+        message_id = self.cur.fetchone()[0]
+        self.conn.commit()
+        
         logger.debug({"event": "Added_message", "message": message, "token_count": token_count, "total_tokens": self.total_messages_tokens})
+        return message_id
 
     def _parse_results(self, response_text: str):
         logger.debug({"event": "Parsing_llm_response", "response_text": response_text})
@@ -214,10 +333,22 @@ class ChatBot:
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'
             logger.debug({"event": "Function_call_response", "response": results_dict})
+            
+            # Log function call in database
+            self.cur.execute("""
+                INSERT INTO function_calls (chat_id, message_id, function_name, parameters, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (self.chat_id, self.messages[-1]['id'], function_name, Json(function_args), function_response))
+            self.conn.commit()
             return results_dict
         else:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
             return '{}'
+
+    def __del__(self):
+        # Close database connection when the object is destroyed
+        self.cur.close()
+        self.conn.close()
 
     def execute(self):
         current_info = f'''
@@ -253,6 +384,14 @@ Current realtime info:
             })
             logger.debug({"event": "Current_message_history", "messages": self.messages})
             logger.debug({"event": "Purged_message_history", "purged_messages": self.purged_messages})
+        
+        for purged_message in self.purged_messages:
+            self.cur.execute("""
+                UPDATE chat_messages
+                SET is_purged = TRUE
+                WHERE chat_id = %s AND role = %s AND content = %s
+            """, (self.chat_id, purged_message['role'], purged_message['content']))
+        self.conn.commit()
 
     def get_llm_response(self, messages: List[Dict[str, str]], model_name: str) -> str | BaseModel:
         logger.debug({"event": "Sending_request_to_LLM", "model": model_name, "messages": messages})

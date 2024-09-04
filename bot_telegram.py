@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from telegram.constants import ParseMode
 from llm_chatbot import chatbot, utils, function_tools
 import re
-from secret_keys import TELEGRAM_BOT_TOKEN
+from secret_keys import TELEGRAM_BOT_TOKEN, POSTGRES_DB_PASSWORD
 from prompts import SYS_PROMPT
 from nltk.tokenize import sent_tokenize
 import xml.etree.ElementTree as ET
@@ -18,7 +18,13 @@ chatbot_system_msg = SYS_PROMPT
 #     model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
 #     tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
 #     system=chatbot_system_msg)
-
+db_config = {    
+    "dbname":"chatbot_db",
+    "user":"your_username",
+    "password":POSTGRES_DB_PASSWORD,
+    "host":"localhost",
+    "port":"5432"
+}
 active_sessions = {}
 
 def get_session(user_id):
@@ -32,6 +38,7 @@ def get_session(user_id):
                 chat_id=session_id,
                 tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
                 system=chatbot_system_msg,
+                db_config=db_config
             ),
         }
         session = active_sessions[user_id]
