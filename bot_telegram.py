@@ -7,15 +7,35 @@ from secret_keys import TELEGRAM_BOT_TOKEN
 from prompts import SYS_PROMPT
 from nltk.tokenize import sent_tokenize
 import xml.etree.ElementTree as ET
+import hashlib
+from uuid import uuid4
 
 # Initialize the ChatBot
 chatbot_system_msg = SYS_PROMPT
 
 # llm_bot = chatbot.ChatBot(model="meta-llama/Meta-Llama-3.1-8B-Instruct", system=chatbot_system_msg)
-llm_bot = chatbot.ChatBot(
-    model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
-    tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
-    system=chatbot_system_msg)
+# llm_bot = chatbot.ChatBot(
+#     model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
+#     tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
+#     system=chatbot_system_msg)
+
+active_sessions = {}
+
+def get_session(user_id):
+    session = active_sessions.get(user_id, None)
+    if session is None:
+        session_id = str(uuid4())
+        active_sessions[user_id] = {
+            "chat_id": session_id,
+            "llm_bot": chatbot.ChatBot(
+                model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
+                chat_id=session_id,
+                tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
+                system=chatbot_system_msg,
+            ),
+        }
+        session = active_sessions[user_id]
+    return session
 
 def split_message(message, limit=4096):
     # Check if the message contains code blocks
@@ -73,6 +93,13 @@ async def start(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text('Hi there! I am your AI assistant. How can I help you today?')
 
 async def new_conversation(update: Update, context: CallbackContext) -> None:
+    user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
+    # clear session if there was one
+    active_sessions.pop(user_id, None)
+    # make new session
+    session = get_session(user_id)
+    llm_bot = session["llm_bot"]
+
     llm_bot.messages = []
     llm_bot.messages_token_counts = []
     llm_bot.total_messages_tokens = 0
@@ -83,14 +110,26 @@ async def new_conversation(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text("Conversation history has been cleared. Starting a new conversation!")
 
 async def change_system_prompt(update: Update, context: CallbackContext) -> None:
+    user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
+    session = get_session(user_id)
+    llm_bot = session["llm_bot"]
+
     new_system_prompt = ' '.join(context.args)
     llm_bot.system = {"role": "system", "content": llm_bot.system}
     await update.message.reply_text(f"System prompt has been updated to: '{new_system_prompt}'")
 
 async def get_system_prompt(update: Update, context: CallbackContext) -> None:
+    user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
+    session = get_session(user_id)
+    llm_bot = session["llm_bot"]
+
     await update.message.reply_text(f"System prompt:\n{llm_bot.system['content']}")
 
 async def handle_message(update: Update, context: CallbackContext) -> None:
+    user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
+    session = get_session(user_id)
+    llm_bot = session["llm_bot"]
+
     user_message = update.message.text
     response = llm_bot(user_message)
     response = utils.sanitize_inner_content(response)

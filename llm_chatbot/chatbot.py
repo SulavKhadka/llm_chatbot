@@ -6,11 +6,15 @@ from pydantic import BaseModel
 from typing import List, Dict
 import ast
 import xml.etree.ElementTree as ET
-from llm_chatbot import function_tools, utils
-from secret_keys import TOGETHER_AI_TOKEN
 from loguru import logger
 import logfire
 import sys
+from uuid import uuid4
+
+from llm_chatbot import function_tools, utils
+from llm_chatbot.tools.python_sandbox import PythonSandbox
+from secret_keys import TOGETHER_AI_TOKEN
+
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -31,7 +35,10 @@ logger.add(
 )
 
 class ChatBot:
-    def __init__(self, model, tokenizer_model="", system=""):
+    def __init__(self, model, chat_id, tokenizer_model="", system=""):
+        global logger
+        self.chat_id = chat_id
+        logger = logger.bind(chat_id=self.chat_id)
         self.system = {"role": "system", "content": system}
         self.model = model
         self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
