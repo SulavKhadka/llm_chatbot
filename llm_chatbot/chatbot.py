@@ -47,7 +47,7 @@ class ChatBot:
         self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
         self.max_message_tokens = 16384
         self.max_reply_msg_tokens = 1536
-        self.functions = function_tools.functions
+        self.functions = function_tools.get_tools()
 
         self.purged_messages = []
         self.purged_messages_token_count = []
@@ -62,8 +62,8 @@ class ChatBot:
 
         if db_config is None:
             db_config = {
-                "dbname": "chatbot_db",
-                "user": "your_username",
+                "dbname":"chatbot_db",
+                "user":"chatbot_user",
                 "password": POSTGRES_DB_PASSWORD,
                 "host": "localhost",
                 "port": "5432"
@@ -101,6 +101,7 @@ class ChatBot:
 
             if parsed_response['response']['type'] == "TOOL_CALL":
                 tool_calls = parsed_response['response']['response']
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<tool_call>\n{parsed_response['response']['response']}\n</tool_call>"})
                 if len(tool_calls) > 0:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
                     tool_call_responses = []
@@ -133,7 +134,7 @@ class ChatBot:
     def initialize_db(cls, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
         cls._initialize_database(dbname, user, password, host, port)
 
-    def _initialize_database(self, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
+    def _initialize_database(dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
         """
         Initialize the database and create necessary tables if they don't exist.
         
@@ -189,7 +190,6 @@ class ChatBot:
             CREATE TABLE IF NOT EXISTS function_calls (
                 id SERIAL PRIMARY KEY,
                 chat_id UUID REFERENCES chat_sessions(chat_id),
-                message_id INTEGER REFERENCES chat_messages(id),
                 function_name VARCHAR(255) NOT NULL,
                 parameters JSONB,
                 response TEXT,
@@ -211,7 +211,7 @@ class ChatBot:
         cur.close()
         conn.close()
 
-        print(f"Database '{dbname}' and tables have been initialized successfully.")
+        logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
 
     def _add_message(self, message):
         self.messages.append(message)
@@ -313,7 +313,7 @@ class ChatBot:
                 logger.error({"event": "Cannot_strip_text", "error": str(e)})
 
             if json_data is not None:
-                tool_calls.append(json_data)
+                tool_calls.extend(json_data)
                 logger.debug({"event": "Extracted_tool_call", "tool_call": json_data})
 
         logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
@@ -323,12 +323,12 @@ class ChatBot:
         logger.info({"event": "Executing_function_call", "tool_call": tool_call})
         function_name = tool_call.get("name", None)
         if function_name is not None and function_name in self.functions.keys():
-            function_to_call = self.functions.get(function_name, None)
+            function_to_call = self.functions.get(function_name, {}).get('function', None)
             function_args = tool_call.get("parameters", {})
 
             logger.debug({"event": "Function_call_details", "name": function_name, "args": function_args})
             try:
-                function_response = function_to_call.call(*function_args.values())
+                function_response = function_to_call.func(*function_args.values())
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'
@@ -336,9 +336,9 @@ class ChatBot:
             
             # Log function call in database
             self.cur.execute("""
-                INSERT INTO function_calls (chat_id, message_id, function_name, parameters, response)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (self.chat_id, self.messages[-1]['id'], function_name, Json(function_args), function_response))
+                INSERT INTO function_calls (chat_id, function_name, parameters, response)
+                VALUES (%s, %s, %s, %s)
+            """, (self.chat_id, function_name, Json(function_args), function_response))
             self.conn.commit()
             return results_dict
         else:
