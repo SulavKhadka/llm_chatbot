@@ -4,14 +4,15 @@ from telegram.constants import ParseMode
 from llm_chatbot import chatbot, utils, function_tools
 import re
 from secret_keys import TELEGRAM_BOT_TOKEN, POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT
+from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW
 from nltk.tokenize import sent_tokenize
 import xml.etree.ElementTree as ET
 import hashlib
 from uuid import uuid4
 
 # Initialize the ChatBot
-chatbot_system_msg = SYS_PROMPT
+tools_prompt = TOOLS_PROMPT_SNIPPET.format(TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.tools))
+chatbot_system_msg = SYS_PROMPT.format(TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW)
 
 # llm_bot = chatbot.ChatBot(model="meta-llama/Meta-Llama-3.1-8B-Instruct", system=chatbot_system_msg)
 # llm_bot = chatbot.ChatBot(
@@ -20,7 +21,7 @@ chatbot_system_msg = SYS_PROMPT
 #     system=chatbot_system_msg)
 db_config = {    
     "dbname":"chatbot_db",
-    "user":"your_username",
+    "user":"chatbot_user",
     "password":POSTGRES_DB_PASSWORD,
     "host":"localhost",
     "port":"5432"

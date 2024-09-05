@@ -1,6 +1,14 @@
 from llama_index.core.tools import FunctionTool
 import requests
 from geopy.geocoders import Nominatim
+import mss
+import mss.tools
+from datetime import datetime
+from PIL import Image
+import numpy as np
+from langchain.tools import tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+
 from secret_keys import OPENWATHERMAP_API_TOKEN
 from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_sandbox import PythonSandbox
@@ -9,6 +17,7 @@ llm_sandbox = PythonSandbox("./llm-sandbox-")
 
 # create an agent
 
+@tool
 def get_current_weather(location: str, unit: str) -> str:
     """
     Fetch current weather data for a given location using the OpenWeatherMap API.
@@ -74,6 +83,7 @@ def get_current_weather(location: str, unit: str) -> str:
         print(f"An error occurred while fetching weather data: {e}")
         return None
 
+@tool
 def web_search(query: str):
     """
     Perform a web search and return formatted results.
@@ -99,11 +109,61 @@ def web_search(query: str):
             })
     return formatted_results
 
+@tool
+def take_screenshots(save=False):
+    """
+    Capture screenshots of all monitors and return them as PIL Image objects.
+
+    This function uses the MSS (Multiple Screen Shot) library to capture screenshots
+    from all available monitors. It skips the first monitor in the list, which is 
+    typically a virtual "all in one" monitor. Each screenshot is converted to a 
+    PIL Image object for easy manipulation and processing.
+
+    Args:
+        save (bool, optional): If True, save each screenshot as a PNG file.
+            Defaults to False.
+
+    Returns:
+        List[Image.Image]: A list of PIL Image objects, each representing a 
+        screenshot from one monitor. The list is ordered by monitor number.
+    """
+    # Create an instance of mss
+    with mss.mss() as sct:
+        # List to store PIL images
+        screenshots = []
+
+        # Iterate through all monitors
+        for monitor in sct.monitors[1:]:  # Skip the first monitor (usually represents the "all in one" virtual monitor)
+            # Capture the screen
+            screenshot = sct.grab(monitor)
+
+            # Convert to PIL Image
+            img = Image.fromarray(np.array(screenshot))
+            
+            screenshots.append(img)
+
+            if save:
+                # Generate a unique filename with timestamp and monitor number
+                filename = f"screenshot_monitor{monitor['monitor']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                
+                # Save the screenshot
+                img.save(filename)
+                print(f"Screenshot saved as {filename}")
+
+    return screenshots
+
+@tool
 def generate_image():
     """Generates an image given a image query"""
     pass
 
-functions = {
-    "get_current_weather": FunctionTool.from_defaults(fn=get_current_weather), 
-    "web_search": FunctionTool.from_defaults(fn=web_search)
-}
+def get_tool_list_prompt(tools):
+    tool_desc_list = [fn['function']['description'] for fn in tools]
+    return "\n\n".join(tool_desc_list)
+
+functions = [
+    get_current_weather,
+    web_search,
+    take_screenshots,
+]
+tools = [convert_to_openai_tool(f) for f in functions]
