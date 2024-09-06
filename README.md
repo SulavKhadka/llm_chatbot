@@ -16,7 +16,25 @@ Notes
 - what to do with <thoughts>, its helpful for it to analyze before outputting a response but after do we just discard?
 - some <self_response> might just be a little note the LLM is keeping for itself, this should be allowed and handled. maybe we need to show examples of this for it to behave correctly here.
 - omitting tags out of the messages list is bad because it starts following how previous messages of the convo, which if we remove the tags we include in the guideline it will confuse it. hmmmm what to do?
+- i think im only logging successful fn/tool calls. need to inspect logging a bit closer.
+- multi tool call works and chained tool calling seems to work as well. need to do an eval on this
 
+thoughts on tools
+---
+- How to enable using a large set of tools?
+- tool chaining and mixing by including tools and their code as rag inputs and have the llm craft a function that uses the tools and execute it in the python interpreter to achieve its goal
+- browser access and web browsing capable tool/agent is needed maybe even necessary. maybe use open-interpreter and slowly build my own?
+- how to give access to personals (gmail, messages, social_media) for monitoring as a personal assistant
+- need to use the screenshot tool and chain it with VLMs to have it understand what the user is seeing
+- how to enable uploading of files to discuss about and feed it into the LLM.
+
+active learning
+---
+- how can the agent learn from interacting(chatting/tool use) with its environment?
+- RAG storage is probably the only way for now. other wayt involves thinking about active training and synthetic data generation so that seems too complicated for now.
+
+misc
+---
 - vllm openAI endpoints
     - `/openapi.json`, Methods: GET, HEAD
     - `/docs`, Methods: GET, HEAD

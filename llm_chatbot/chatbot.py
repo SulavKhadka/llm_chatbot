@@ -12,6 +12,7 @@ import sys
 import psycopg2
 from psycopg2.extras import Json
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
+import re
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
@@ -106,7 +107,8 @@ class ChatBot:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
                     tool_call_responses = []
                     for tool_call in tool_calls:
-                        tool_call_responses.append(self._execute_function_call(tool_call))
+                        fn_response = self._execute_function_call(tool_call)
+                        tool_call_responses.append(fn_response)
                     tool_response_str = '\n'.join(tool_call_responses)
                     self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_response_str}\n</tool_call_response>"})
                     continue
@@ -338,7 +340,7 @@ class ChatBot:
             self.cur.execute("""
                 INSERT INTO function_calls (chat_id, function_name, parameters, response)
                 VALUES (%s, %s, %s, %s)
-            """, (self.chat_id, function_name, Json(function_args), function_response))
+            """, (self.chat_id, function_name, Json(function_args), str(function_response)))
             self.conn.commit()
             return results_dict
         else:
@@ -351,11 +353,14 @@ class ChatBot:
         self.conn.close()
 
     def execute(self):
+        self.system['content'] = re.sub(pattern='<current_realtime_info>.*</current_realtime_info>', repl='', string=self.system['content'])
         current_info = f'''
-Current realtime info:
+<current_realtime_info>
 - Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-- Location: Seattle Home Server'''
+- Location: Seattle Home Server
+</current_realtime_info>'''
         self.system['content'] += current_info
+        
         messages = [self.system]
         messages.extend(self.messages)
         logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
