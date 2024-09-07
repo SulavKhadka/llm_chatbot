@@ -15,8 +15,10 @@ Notes
 - need to add examples of when to use <self_response>, <user_response>, and <plan>
 - what to do with <thoughts>, its helpful for it to analyze before outputting a response but after do we just discard?
 - some <self_response> might just be a little note the LLM is keeping for itself, this should be allowed and handled. maybe we need to show examples of this for it to behave correctly here.
-- omitting tags out of the messages list is bad because it starts following how previous messages of the convo, which if we remove the tags we include in the guideline it will confuse it. hmmmm what to do?
+- omitting tags out of the messages list is bad because it starts following how previous messages of the convo, which if we remove the tags we include in the guideline it will confuse it. hmmmm what to do? 
+    - SOLUTION: decided to keep the <thought> tags and one of the 4 response tags that it replies with per turn
 - i think im only logging successful fn/tool calls. need to inspect logging a bit closer.
+    - wasn't logging the <tool_call> only the responses, now added that so its a chain of `<user> -> <tool_call> -> <tool_call_response>`
 - multi tool call works and chained tool calling seems to work as well. need to do an eval on this
 
 thoughts on tools
@@ -84,3 +86,5 @@ python -m pip install flash-attn --no-build-isolation
 To-Do
 ---
 [x] Add to system prompt some realtime details to give the chatbot some grounding and info: DateTime
+[ ] give it access to inject files and use them in the chat as context, so basically RAG but more realtime i guess
+ 
