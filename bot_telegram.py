@@ -143,8 +143,8 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     response = utils.sanitize_inner_content(response)
     root = ET.fromstring(f"<root>{response}</root>")
     
-    # Extract text from <user_response> tag
-    user_response = root.find('.//user_response')
+    # Extract text from <response_to_user> tag
+    user_response = root.find('.//response_to_user')
     response = user_response.text.strip() if user_response is not None else ""
 
     # Split the response if it's too long

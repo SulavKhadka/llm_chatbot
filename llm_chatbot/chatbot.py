@@ -121,14 +121,14 @@ class ChatBot:
                     continue
                 else:
                     self_recurse = False
-                    response = f"{llm_thought}\n<self_response>\nno tool calls found, continuing on\n</self_response>"
+                    response = f"{llm_thought}\n<internal_response>\nno tool calls found, continuing on\n</internal_response>"
             
             if parsed_response['response']['type'] == "USER_RESPONSE":
                 self_recurse = False
-                response = f"{llm_thought}\n<user_response>\n{parsed_response['response']['response']}\n</user_response>"
+                response = f"{llm_thought}\n<response_to_user>\n{parsed_response['response']['response']}\n</response_to_user>"
 
             if parsed_response['response']['type'] == "SELF_RESPONSE":
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<self_response>\n{parsed_response['response']['response']}\n</self_response>"})
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>\n{parsed_response['response']['response']}\n</internal_response>"})
                 continue
 
             if parsed_response['response']['type'] == "PLAN":
@@ -263,7 +263,7 @@ class ChatBot:
         parsed_resp['thought'] = "\n".join(thoughts).strip()
 
         user_response = ""
-        for element in root.findall(".//user_response"):
+        for element in root.findall(".//response_to_user"):
             user_response += element.text
         if user_response != "":
             parsed_resp['response']['type'] = "USER_RESPONSE"
@@ -271,7 +271,7 @@ class ChatBot:
             return parsed_resp 
 
         self_response = ""
-        for element in root.findall(".//self_response"):
+        for element in root.findall(".//internal_response"):
             self_response += element.text
         if self_response != "":
             parsed_resp['response']['type'] = "SELF_RESPONSE"
