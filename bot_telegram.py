@@ -151,9 +151,12 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
     if len(response) > 4096:  # Telegram message limit
         parts = split_message(response)
         for part in parts:
-            await update.message.reply_text(part, parse_mode=ParseMode.MARKDOWN)
+            await update.message.reply_text(part)
     else:
-        await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+        try:
+            await update.message.reply_text(response)
+        except Exception as e:
+            print(e)
 
 def main():
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()

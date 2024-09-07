@@ -16,7 +16,7 @@ import re
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD
+from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, GROQ_API_KEY
 
 
 # Configure logfire
@@ -39,9 +39,7 @@ logger.add(
 
 class ChatBot:
     def __init__(self, model, chat_id, tokenizer_model="", system="", db_config=None):
-        global logger
         self.chat_id = chat_id
-        logger = logger.bind(chat_id=self.chat_id)
         self.system = {"role": "system", "content": system}
         self.model = model
         self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
@@ -61,6 +59,11 @@ class ChatBot:
             base_url="https://api.together.xyz/v1"
         )
 
+        # self.openai_client = openai.OpenAI(
+        #     base_url="https://api.groq.com/openai/v1",
+        #     api_key=GROQ_API_KEY
+        # )
+
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
@@ -70,6 +73,9 @@ class ChatBot:
                 "port": "5432"
             }
         
+        global logger
+        logger = logger.bind(chat_id=self.chat_id)
+
         # Initialize database if it doesn't exist
         self.initialize_db(**db_config)
         
@@ -84,6 +90,7 @@ class ChatBot:
         """, (self.chat_id, self.model, self.tokenizer_model, system))
         self.conn.commit()
 
+        self._add_message(self.system)
         logger.info({"event": "ChatBot_initialized", "model": model})
         logger.debug({"event": "Initial_system_message", "system_message": self.system})
 
@@ -315,7 +322,10 @@ class ChatBot:
                 logger.error({"event": "Cannot_strip_text", "error": str(e)})
 
             if json_data is not None:
-                tool_calls.extend(json_data)
+                if isinstance(json_data, list):
+                    tool_calls.extend(json_data)
+                else:
+                    tool_calls.append(json_data)
                 logger.debug({"event": "Extracted_tool_call", "tool_call": json_data})
 
         logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})

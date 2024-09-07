@@ -448,13 +448,9 @@ def get_tools():
         get_current_weather,
         web_search,
         take_screenshots,
-        add_2_nums,
-        get_random_number,
         search_pubmed,
         search_arxiv,
-        tool(interpreter.create_session),
         tool(interpreter.run_command),
-        tool(interpreter.close_session),
         tool(interpreter.install_package),
         tool(interpreter.uninstall_package),
         tool(interpreter.run_python_code)
