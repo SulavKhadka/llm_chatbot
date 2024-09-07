@@ -29,6 +29,7 @@ thoughts on tools
 - how to enable uploading of files to discuss about and feed it into the LLM.
 - arxiv and stuff needs more options like, search for list of paper titles only or hand back x results instead of being limited by char_length.
 - need to meter the API calls and how many made so we try to not blow it up. can even be fed back into it for better sense of resource usage
+- if i want it to take a screenshot with screenshot tool then pass it into the query_vlm tool, how would i do that? currently the outputs are all posted as <tool_call_response> as string. how can i share arbritary objects as well?
 
 active learning
 ---
