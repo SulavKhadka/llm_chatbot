@@ -29,6 +29,9 @@ thoughts on tools
 - how to give access to personals (gmail, messages, social_media) for monitoring as a personal assistant
 - need to use the screenshot tool and chain it with VLMs to have it understand what the user is seeing
 - how to enable uploading of files to discuss about and feed it into the LLM.
+- arxiv and stuff needs more options like, search for list of paper titles only or hand back x results instead of being limited by char_length.
+- need to meter the API calls and how many made so we try to not blow it up. can even be fed back into it for better sense of resource usage
+- if i want it to take a screenshot with screenshot tool then pass it into the query_vlm tool, how would i do that? currently the outputs are all posted as <tool_call_response> as string. how can i share arbritary objects as well?
 
 active learning
 ---
@@ -50,6 +53,33 @@ misc
     - `/v1/chat/completions`, Methods: POST
     - `/v1/completions`, Methods: POST
     - `/v1/embeddings`, Methods: POST
+
+clean install
+---
+```bash
+\# install uv
+apt update
+apt install -y postgresql
+apt install -y poppler-utils libpq-dev python3.11-dev
+
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.cargo/env
+uv python install 3.11
+
+git clone https://github.com/SulavKhadka/llm_chatbot.git
+cd llm_chatbot
+
+uv venv --python=3.12
+source .venv/bin/activate
+
+uv pip install python-telegram-bot discord.py transformers pydantic openai loguru logfire llama-index geopy huggingface-hub mss langchain ipykernel ipywidgets nvitop torchvision pdf2image qwen-vl-utils torch psutil psycopg2 psycopg2-binary langchain-community "wikibase-rest-api-client<0.2" mediawikiapi arxiv
+
+uv pip install -U pip
+python -m pip install flash-attn --no-build-isolation
+
+
+\# To add $HOME/.cargo/bin to your PATH
+```
 
 To-Do
 ---
