@@ -4,7 +4,7 @@ from geopy.geocoders import Nominatim
 import mss
 import mss.tools
 from datetime import datetime
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import numpy as np
 from langchain.tools import tool
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -369,6 +369,65 @@ def search_arxiv(query: str, max_result_chars: int = 2500):
     arx = ArxivAPIWrapper()
     arx.api_wrapper.doc_content_chars_max = max_result_chars
     return arx.run(query)
+
+@tool
+def query_vlm(image_path: str, query: str) -> str:
+    """
+    Perform a visual query on an image using a Vision Language Model.
+
+    This tool opens an image from a local directory and applies a specified query to that image 
+    using a Vision Language Model (VLM). It's useful for tasks such as object detection, scene 
+    description, text recognition in images, or answering specific questions about the image content.
+
+    Args:
+        image_path (str): The file path to the image. This should be a valid path to an image file 
+            in a format supported by PIL (e.g., JPG, PNG, BMP).
+        query (str): The query or question to ask about the image. This can be a description request, 
+            a specific question about the image content, or any other prompt that the VLM can process.
+
+    Returns:
+        str: Either the response from the Vision Language Model based on the image and query, or 
+        an error message if something went wrong. The exact format and content of the successful 
+        response will depend on the query and the capabilities of the underlying VLM. Error messages 
+        will describe what went wrong during the process.
+
+    Note:
+        - This function requires the PIL (Python Imaging Library) to be installed and imported as 'Image'.
+        - The function assumes the existence of a separate 'query_image' function that takes a PIL Image 
+          object and a query string as inputs. Make sure this function is properly defined and imported.
+        - The performance and accuracy of the results depend on the underlying Vision Language Model, 
+          which is not specified in this function.
+        - Large images may require significant processing time and memory.
+        - The function does not modify the original image file.
+        - Ensure that you have the necessary permissions to access the image file.
+        - The Vision Language Model may have limitations on the types of queries it can accurately respond to.
+        - If an error occurs (e.g., file not found, invalid image format, empty inputs), the function 
+          will return an error message as a string rather than raising an exception.
+    """
+    from llm_chatbot.tools.vlm_image_processor import query_image
+    
+    try:
+        if not image_path.strip():
+            raise ValueError("Image path cannot be empty.")
+        if not query.strip():
+            raise ValueError("Query cannot be empty.")
+
+        image = Image.open(image_path)
+        result = query_image(image, query)
+        return result
+
+    except FileNotFoundError:
+        return "Error: The specified image file does not exist. Please check the file path and try again."
+    except UnidentifiedImageError:
+        return "Error: The file exists but is not a valid image format. Please ensure you're using a supported image file."
+    except ValueError as e:
+        return f"Error: {str(e)}"
+    except RuntimeError:
+        return "Error: There was a problem processing the image or query. Please try again or check your inputs."
+    except Exception as e:
+        return f"An unexpected error occurred: {str(e)}"
+
+
 
 
 def get_tool_list_prompt(tools):
