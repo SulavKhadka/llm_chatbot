@@ -27,6 +27,8 @@ thoughts on tools
 - how to give access to personals (gmail, messages, social_media) for monitoring as a personal assistant
 - need to use the screenshot tool and chain it with VLMs to have it understand what the user is seeing
 - how to enable uploading of files to discuss about and feed it into the LLM.
+- arxiv and stuff needs more options like, search for list of paper titles only or hand back x results instead of being limited by char_length.
+- need to meter the API calls and how many made so we try to not blow it up. can even be fed back into it for better sense of resource usage
 
 active learning
 ---
