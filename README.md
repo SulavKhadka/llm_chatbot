@@ -30,6 +30,7 @@ thoughts on tools
 - arxiv and stuff needs more options like, search for list of paper titles only or hand back x results instead of being limited by char_length.
 - need to meter the API calls and how many made so we try to not blow it up. can even be fed back into it for better sense of resource usage
 - if i want it to take a screenshot with screenshot tool then pass it into the query_vlm tool, how would i do that? currently the outputs are all posted as <tool_call_response> as string. how can i share arbritary objects as well?
+- user message can have link to explore, need to include examples of that too
 
 active learning
 ---
@@ -38,6 +39,7 @@ active learning
 
 misc
 ---
+- small llm that just adds docstrings to a repo passively as it observes new edits in the repo its activated in
 - vllm openAI endpoints
     - `/openapi.json`, Methods: GET, HEAD
     - `/docs`, Methods: GET, HEAD
@@ -67,7 +69,7 @@ uv python install 3.11
 git clone https://github.com/SulavKhadka/llm_chatbot.git
 cd llm_chatbot
 
-uv venv --python=3.12
+uv venv --python=3.11
 source .venv/bin/activate
 
 uv pip install python-telegram-bot discord.py transformers pydantic openai loguru logfire llama-index geopy huggingface-hub mss langchain ipykernel ipywidgets nvitop torchvision pdf2image qwen-vl-utils torch psutil psycopg2 psycopg2-binary langchain-community "wikibase-rest-api-client<0.2" mediawikiapi arxiv

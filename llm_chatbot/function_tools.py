@@ -14,6 +14,7 @@ import random
 
 from secret_keys import OPENWATHERMAP_API_TOKEN
 from llm_chatbot.tools.web_search import web_search_api
+from llm_chatbot.tools.python_interpreter import UVPythonInterpreter
 
 # create an agent
 @tool
@@ -440,6 +441,7 @@ def get_tool_list_prompt(tools):
 
 
 def get_tools():
+    interpreter = UVPythonInterpreter()
     tool_dict = {}
     functions = [
         get_current_weather,
@@ -448,7 +450,16 @@ def get_tools():
         add_2_nums,
         get_random_number,
         search_pubmed,
-        search_arxiv
+        search_arxiv,
+        tool(interpreter.ensure_uv_installed),
+        tool(interpreter.create_session),
+        tool(interpreter.run_command),
+        tool(interpreter.close_session),
+        tool(interpreter.install_package),
+        tool(interpreter.uninstall_package),
+        tool(interpreter.run_python_code),
+        tool(interpreter.list_installed_packages),
+        tool(interpreter.get_python_version)
     ]
     for fn in functions:
         tool_schema = convert_to_openai_tool(fn)
