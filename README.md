@@ -33,11 +33,15 @@ thoughts on tools
 - need to meter the API calls and how many made so we try to not blow it up. can even be fed back into it for better sense of resource usage
 - if i want it to take a screenshot with screenshot tool then pass it into the query_vlm tool, how would i do that? currently the outputs are all posted as <tool_call_response> as string. how can i share arbritary objects as well?
 - user message can have link to explore, need to include examples of that too
+- TODO: insert tools into every python interpreter so they can combine and chain the tools as the agents see fit. Also add examples of this demonstrated in the system prompt
+- Add in the message eb entry a column for "sent_to_viewer" to make sure we track which of the generated message actually made it ot the viewer. sometimes the api of the messaging platform or UI might not be responsive or fail at the sending stage.
+
 
 active learning
 ---
 - how can the agent learn from interacting(chatting/tool use) with its environment?
 - RAG storage is probably the only way for now. other wayt involves thinking about active training and synthetic data generation so that seems too complicated for now.
+
 
 misc
 ---

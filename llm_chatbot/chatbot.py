@@ -409,7 +409,7 @@ class ChatBot:
         self.conn.commit()
 
     def get_llm_response(self, messages: List[Dict[str, str]], model_name: str) -> str | BaseModel:
-        logger.debug({"event": "Sending_request_to_LLM", "model": model_name, "messages": messages})
+        logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
         chat_completion = self.openai_client.chat.completions.create(
             model=model_name,
             messages=messages,
