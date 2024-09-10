@@ -8,8 +8,133 @@ import time
 import select
 from typing import Dict, Any, Optional
 
+from secret_keys import POSTGRES_DB_PASSWORD
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+bash_scripts = {
+    "install_postgres": '''#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+# Function to print messages
+print_message() {
+    echo "===> $1"
+}
+
+# Function to check if PostgreSQL is installed and running
+check_postgres() {
+    if ! command -v psql &> /dev/null; then
+        return 1
+    fi
+    if ! systemctl is-active --quiet postgresql; then
+        return 1
+    fi
+    return 0
+}
+
+# Check for required environment variables
+if [ -z "$POSTGRES_PASSWORD" ] || [ -z "$APP_DB_USER" ] || [ -z "$APP_DB_NAME" ] || [ -z "$APP_DB_PASSWORD" ]; then
+    print_message "Error: Missing required environment variables. Please set POSTGRES_PASSWORD, APP_DB_USER, APP_DB_NAME, and APP_DB_PASSWORD."
+    exit 1
+fi
+
+# Check if PostgreSQL is already installed and running
+if check_postgres; then
+    print_message "PostgreSQL is already installed and running."
+    exit 0
+fi
+
+# Update system
+print_message "Updating system..."
+sudo apt update
+sudo apt upgrade -y
+
+# Install PostgreSQL
+print_message "Installing PostgreSQL..."
+sudo apt install postgresql postgresql-contrib -y
+
+# Verify installation
+print_message "Verifying PostgreSQL installation..."
+sudo systemctl status postgresql
+
+# Set password for postgres user
+print_message "Setting password for postgres user..."
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$POSTGRES_PASSWORD';"
+
+# Create new PostgreSQL user and database
+print_message "Creating new PostgreSQL user and database..."
+sudo -u postgres createuser --superuser "$APP_DB_USER"
+sudo -u postgres createdb "$APP_DB_NAME"
+
+# Set password for new user
+print_message "Setting password for new user..."
+sudo -u postgres psql -c "ALTER USER $APP_DB_USER WITH PASSWORD '$APP_DB_PASSWORD';"
+
+# Configure PostgreSQL to allow password authentication
+print_message "Configuring PostgreSQL authentication..."
+PG_HBA_FILE=$(sudo -u postgres psql -t -P format=unaligned -c "SHOW hba_file;")
+sudo sed -i 's/local   all   postgres   peer/local   all   postgres   md5/' "$PG_HBA_FILE"
+
+# Restart PostgreSQL
+print_message "Restarting PostgreSQL..."
+sudo systemctl restart postgresql
+
+print_message "PostgreSQL setup complete!"''',
+    "tmp_uv_setup_script": '''#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+echo "Initial Python version:"
+which python
+
+# Check if uv is installed
+if ! command_exists uv; then
+    echo "uv is not installed. Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    source $HOME/.cargo/env
+else
+    echo "uv is already installed. Version: $(uv --version)"
+fi
+
+# Install Python 3.11 using uv if not already installed
+if ! command_exists python3.11; then
+    echo "Installing Python 3.11..."
+    uv python install 3.11
+else
+    echo "Python 3.11 is already installed."
+fi
+
+# Check if .venv directory exists
+if [ ! -d ".venv" ]; then
+    echo "Creating a new virtual environment..."
+    uv venv --python=3.11
+else
+    echo "Virtual environment already exists."
+fi
+
+# Activate the virtual environment
+echo "Activating the virtual environment..."
+source .venv/bin/activate
+
+alias pip="python -m pip"
+
+# Verify Python version
+echo "Python version:"
+which python
+
+echo "Setup complete. The virtual environment is now activated."
+echo "To deactivate the environment, run 'deactivate'."
+echo "To activate it again later, run 'source .venv/bin/activate' from the llm_chatbot directory."''',
+}
 
 class UVPythonShellManager:
     """
@@ -79,59 +204,23 @@ class UVPythonShellManager:
                 cwd=session_dir
             )
 
+            with open(f"{session_dir}/install_postgres.sh", "w") as file:
+                file.write(bash_scripts['install_postgres'])
+
+            self.execute_command(process, f"export POSTGRES_PASSWORD='{POSTGRES_DB_PASSWORD}'", timeout=30)
+            self.execute_command(process, "export APP_DB_USER='chatbot_user'", timeout=30)
+            self.execute_command(process, "export APP_DB_NAME='chatbot_db'", timeout=30)
+            self.execute_command(process, f"export APP_DB_PASSWORD='{POSTGRES_DB_PASSWORD}appify'", timeout=30)
+
+            logger.info("ensuring postgresql is installed")
+            postgres_setup_output = self.execute_command(process, f"/bin/bash {session_dir}/install_postgres.sh", timeout=30)
+
+
             with open(f"{session_dir}/tmp_uv_setup_script.sh", "w") as file:
-                file.write('''#!/bin/bash
-
-# Exit immediately if a command exits with a non-zero status
-set -e
-
-# Function to check if a command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-echo "Initial Python version:"
-which python
-
-# Check if uv is installed
-if ! command_exists uv; then
-    echo "uv is not installed. Installing uv..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    source $HOME/.cargo/env
-else
-    echo "uv is already installed. Version: $(uv --version)"
-fi
-
-# Install Python 3.11 using uv if not already installed
-if ! command_exists python3.11; then
-    echo "Installing Python 3.11..."
-    uv python install 3.11
-else
-    echo "Python 3.11 is already installed."
-fi
-
-# Check if .venv directory exists
-if [ ! -d ".venv" ]; then
-    echo "Creating a new virtual environment..."
-    uv venv --python=3.11
-else
-    echo "Virtual environment already exists."
-fi
-
-# Activate the virtual environment
-echo "Activating the virtual environment..."
-source .venv/bin/activate
-
-# Verify Python version
-echo "Python version:"
-which python
-
-echo "Setup complete. The virtual environment is now activated."
-echo "To deactivate the environment, run 'deactivate'."
-echo "To activate it again later, run 'source .venv/bin/activate' from the llm_chatbot directory."''')
+                file.write(bash_scripts['tmp_uv_setup_script'])
 
             logger.info("ensuring uv is installed")
-            setup_cmd_output = self.execute_command(process, f"/bin/bash {session_dir}/tmp_uv_setup_script.sh", timeout=30)
+            uv_setup_output = self.execute_command(process, f"/bin/bash {session_dir}/tmp_uv_setup_script.sh", timeout=30)
 
             self.curr_session_id = session_id
             self.active_sessions[session_id] = {
@@ -177,14 +266,19 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
               return an error status.
         """
         try:
+            
+            command_id = os.urandom(8).hex()
+            end_marker = f"__END_OF_COMMAND_{command_id}__"
+
             process.stdin.write(f"{command}\n")
             process.stdin.flush()
+            time.sleep(0.01)  # Small delay to allow command processing
 
-            stdout_output, stderr_output = [], []
-            
-            end_marker = f"__END_OF_COMMAND_{os.urandom(8).hex()}__"
             process.stdin.write(f"echo {end_marker}\n")
             process.stdin.flush()
+            time.sleep(0.01)  # Small delay to allow command processing
+
+            stdout_output, stderr_output = [], []
 
             poller = select.poll()
             poller.register(process.stdout, select.POLLIN)
@@ -192,19 +286,38 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
 
             end_time = time.time() + timeout
             while time.time() < end_time:
-                ready = poller.poll(0.1)
+                if process.poll() is not None:
+                    logger.warning("Process terminated unexpectedly")
+                    break
+
+                ready = poller.poll(0.01)  # Increase polling frequency
+                if not ready:
+                    time.sleep(0.001)  # Avoid busy-waiting with a very small delay
+                    continue
+
                 for fd, event in ready:
                     if event & select.POLLIN:
                         if fd == process.stdout.fileno():
-                            line = process.stdout.readline().strip()
-                            if line == end_marker:
-                                return {"status": "success", "stdout": '\n'.join(stdout_output), "stderr": '\n'.join(stderr_output)}
-                            stdout_output.append(line)
-                            logger.info(f"STDOUT: {line}")
+                            while True:
+                                line = process.stdout.readline()
+                                if not line or time.time() >= end_time:
+                                    break
+                                
+                                if end_marker in line:
+                                    return {"status": "success", "stdout": '\n'.join(stdout_output), "stderr": '\n'.join(stderr_output)}
+                                
+                                stdout_output.append(line.strip())
+                                logger.debug(f"STDOUT: {line.strip()}")
                         elif fd == process.stderr.fileno():
-                            line = process.stderr.readline().strip()
-                            stderr_output.append(line)
-                            logger.error(f"STDERR: {line}")
+                            while True:
+                                line = process.stderr.readline()
+                                if not line or time.time() >= end_time:
+                                    break
+                                stderr_output.append(line.strip())
+                                logger.debug(f"STDERR: {line.strip()}")
+
+            if time.time() >= end_time:
+                logger.debug("Timeout reached")
 
             logger.warning(f"Command execution timed out after {timeout} seconds")
             return {"status": "error", "message": f"Command timed out after {timeout} seconds"}
@@ -290,7 +403,7 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
                 f.write(code)
             logger.info(f"Wrote code to {script_path}")
 
-            result = self.run_command(session_id, f"python {script_path}")
+            result = self.run_command(f"python {script_path}", session_id)
 
             os.remove(script_path)
             logger.info(f"Removed temporary script: {script_path}")
@@ -334,7 +447,7 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
         if session_id not in self.active_sessions:
             return {"status": "error", "message": f"Session {session_id} not found"}
         
-        return self.run_command(session_id, f"uv pip install {package_name}")
+        return self.run_command(f"uv pip install {package_name}", session_id)
 
     def uninstall_package(self, package_name: str, session_id: str = None) -> Dict[str, str]:
         """
@@ -368,7 +481,7 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
         if session_id not in self.active_sessions:
             return {"status": "error", "message": f"Session {session_id} not found"}
         
-        return self.run_command(session_id, f"uv pip uninstall -y {package_name}")
+        return self.run_command(f"uv pip uninstall -y {package_name}", session_id)
 
     def close_session(self, session_id: str = None) -> Dict[str, str]:
         """
@@ -406,124 +519,6 @@ echo "To activate it again later, run 'source .venv/bin/activate' from the llm_c
             session = self.active_sessions[session_id]
             session['process'].terminate()
             session['process'].wait(timeout=5)
-            shutil.rmtree(session['dir'])
-            del self.active_sessions[session_id]
-            logger.info(f"Session {session_id} closed and cleaned up")
-            return {"status": "success", "message": f"Session {session_id} closed successfully"}
-        except Exception as e:
-            logger.error(f"Error closing session: {str(e)}", exc_info=True)
-            return {"status": "error", "message": f"Failed to close session: {str(e)}"}
-
-if __name__ == "__main__":
-    manager = UVPythonShellManager()
-
-    # Create a new session
-    result = manager.create_session()
-    if result["status"] == "success":
-        session_id = result["session_id"]
-        print(f"Session created: {session_id}")
-
-        # Run some Python code
-        code_result = manager.run_python_code(session_id, "print('Hello, World!')\nprint(2 + 2)")
-        print(f"Code execution result: {code_result}")
-
-        # Install a package
-        install_result = manager.install_package(session_id, "numpy")
-        print(f"Package installation result: {install_result}")
-
-        # List installed packages
-        packages_result = manager.list_installed_packages(session_id)
-        print(f"Installed packages: {packages_result}")
-
-        # Close the session
-        close_result = manager.close_session(session_id)
-        print(f"Session close result: {close_result}")
-    else:
-        print(f"Failed to create session: {result['message']}")
-
-
-    def create_session(self) -> Dict[str, str]:
-        session_id = str(uuid.uuid4())
-        session_dir = os.path.join(self.base_dir, session_id)
-
-        try:
-            os.makedirs(session_dir)
-            logger.info(f"Created session directory: {session_dir}")
-
-
-
-            self.active_sessions[session_id] = {
-                'process': process,
-                'dir': session_dir,
-                'python_path': python_path
-            }
-
-            logger.info(f"Session {session_id} created successfully")
-            return {"status": "success", "session_id": session_id, "message": "Session created successfully"}
-        except Exception as e:
-            logger.error(f"Error creating session: {str(e)}", exc_info=True)
-            if os.path.exists(session_dir):
-                shutil.rmtree(session_dir)
-            return {"status": "error", "message": f"Failed to create session: {str(e)}"}
-
-    def run_command(self, session_id: str, command: str, timeout: float = 30.0) -> Dict[str, str]:
-        if session_id not in self.active_sessions:
-            return {"status": "error", "message": f"Session {session_id} not found"}
-
-        session = self.active_sessions[session_id]
-        activate_cmd = f"source {session['activate_path']} && {command}"
-        return self.execute_command(["bash", "-c", activate_cmd], cwd=session['dir'], timeout=timeout)
-
-    def run_python_code(self, session_id: str, code: str) -> Dict[str, str]:
-        if session_id not in self.active_sessions:
-            return {"status": "error", "message": f"Session {session_id} not found"}
-
-        session = self.active_sessions[session_id]
-        script_path = os.path.join(session['dir'], "temp_script.py")
-
-        try:
-            with open(script_path, "w") as f:
-                f.write(code)
-            logger.info(f"Wrote code to {script_path}")
-
-            result = self.run_command(session_id, f"{session['python_path']} {script_path}")
-
-            os.remove(script_path)
-            logger.info(f"Removed temporary script: {script_path}")
-
-            return result
-        except Exception as e:
-            logger.error(f"Error running code: {str(e)}", exc_info=True)
-            if os.path.exists(script_path):
-                os.remove(script_path)
-            return {"status": "error", "message": f"Failed to run code: {str(e)}"}
-
-    def install_package(self, session_id: str, package_name: str) -> Dict[str, str]:
-        return self.run_command(session_id, f"uv pip install {package_name}")
-
-    def uninstall_package(self, session_id: str, package_name: str) -> Dict[str, str]:
-        return self.run_command(session_id, f"uv pip uninstall -y {package_name}")
-
-    def list_installed_packages(self, session_id: str) -> Dict[str, Any]:
-        result = self.run_command(session_id, "uv pip list --format=json")
-        if result["status"] == "success":
-            try:
-                packages = json.loads(result["stdout"])
-                return {"status": "success", "packages": packages}
-            except json.JSONDecodeError:
-                return {"status": "error", "message": "Failed to parse package list"}
-        else:
-            return result
-
-    def get_python_version(self, session_id: str) -> Dict[str, str]:
-        return self.run_command(session_id, "python --version")
-
-    def close_session(self, session_id: str) -> Dict[str, str]:
-        if session_id not in self.active_sessions:
-            return {"status": "error", "message": f"Session {session_id} not found"}
-
-        try:
-            session = self.active_sessions[session_id]
             shutil.rmtree(session['dir'])
             del self.active_sessions[session_id]
             logger.info(f"Session {session_id} closed and cleaned up")
