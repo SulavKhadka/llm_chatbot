@@ -27,6 +27,7 @@ def get_session(user_id):
             session_data = response.json()
             active_sessions[user_id] = {"chat_id": session_data["chat_id"]}
             session = active_sessions[user_id]
+            print(f"Session: {session_data["chat_id"]} created")
         else:
             raise Exception("Failed to create a new chat session")
     return session
@@ -86,6 +87,7 @@ async def new_conversation(update: Update, context: CallbackContext) -> None:
     active_sessions.pop(user_id, None)
     session = get_session(user_id)
     await update.message.reply_text("Conversation history has been cleared. Starting a new conversation!")
+    print(f"{session['chat_id']}: Conversation history has been cleared. Starting a new conversation!")
 
 async def change_system_prompt(update: Update, context: CallbackContext) -> None:
     user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
@@ -113,6 +115,7 @@ async def handle_message_with_media(update: Update, context: CallbackContext, me
     user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
     session = get_session(user_id)
 
+    print(f"{session['chat_id']}: processing {media_type} message from user")
     if media_type == 'photo':
         file = await update.message.photo[-1].get_file()
     elif media_type == 'video':
@@ -161,6 +164,7 @@ async def handle_text(update: Update, context: CallbackContext) -> None:
     user_id = hashlib.md5(f"{update.message.from_user.full_name}_{update.message.from_user.id}".encode()).hexdigest()
     session = get_session(user_id)
 
+    print(f"{session['chat_id']}: processing text message from user")
     user_message = update.message.text
     response = requests.post(f"{API_BASE_URL}/chat/{session['chat_id']}/message", json={"content": user_message})
     

@@ -10,6 +10,8 @@ from PIL import Image
 import soundfile as sf
 import ffmpeg
 from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = FastAPI()
 
@@ -22,6 +24,15 @@ chatbots: Dict[str, ChatBot] = {}
 
 MEDIA_FOLDER = "/media"
 os.makedirs(MEDIA_FOLDER, exist_ok=True)
+
+# Database configuration
+DB_CONFIG = {
+    "dbname": "chatbot_db",
+    "user": "chatbot_user",
+    "password": os.getenv("POSTGRES_DB_PASSWORD"),
+    "host": "localhost",
+    "port": "5432"
+}
 
 class ChatSession(BaseModel):
     model: str
@@ -42,7 +53,8 @@ async def create_chat(chat_session: ChatSession):
         model=chat_session.model,
         chat_id=chat_id,
         tokenizer_model=chat_session.tokenizer_model,
-        system=chat_session.system
+        system=chat_session.system,
+        db_config=DB_CONFIG
     )
     response = chatbots[chat_id]("Hello! This is the start of our conversation.")
     return ChatResponse(chat_id=chat_id, response=response)
@@ -122,6 +134,27 @@ async def process_media(chat_id: str, file: UploadFile, media_type: str):
     response = chatbots[chat_id](bot_message)
     
     return {"filename": np_filename, "response": response}
+
+@app.get("/chats")
+async def get_all_chat_sessions():
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        cur.execute("""
+            SELECT * FROM chat_sessions
+            ORDER BY created_at DESC
+        """)
+        chat_sessions = cur.fetchall()
+        return {"chat_sessions": chat_sessions}
+    finally:
+        cur.close()
+        conn.close()
+
+@app.get("/tools")
+async def get_tools_list():
+    tools = function_tools.get_tools()
+    return {"tools": [{"name": name, "description": tool.description} for name, tool in tools.items()]}
 
 if __name__ == "__main__":
     import uvicorn
