@@ -41,7 +41,7 @@ active learning
 ---
 - how can the agent learn from interacting(chatting/tool use) with its environment?
 - RAG storage is probably the only way for now. other wayt involves thinking about active training and synthetic data generation so that seems too complicated for now.
-
+- need to be able to mark past content in the current message tree as needed or not needed so we can later trim it smartly (we can trim the cat outputs of large programs or logfiles because we probably only needed small piece of info for it or have summarized the key info into a succint text that we dont need the original anymore to add noise.)
 
 misc
 ---
