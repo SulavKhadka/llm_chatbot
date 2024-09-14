@@ -1,0 +1,57 @@
+day to day tools that would help me:
+- can you note this down: [link, text, screenshot, image]
+- track this flight for me:
+    - where is the flight going to X now?
+    - how long till the x->Y plane lands?
+    - where was the landing of the X flight again?
+    - what airport did the flight coming into Y leave from?
+- remind me about this thing/task
+    - when? [specific time or datetime, approximate time(few hours, few days, etc) ]
+    - whats it for? [this thing, dont worry about it]
+- email inbox:
+    - can you find the flight details regarding the SEA->IAD flight i have coming?
+    - when was the last time i got an email about/from [brand, subject, flight, hotel booking, person, invitations]
+    - How many unread emails do i have?
+    - Did [person] email me yet?
+    - Grab all the emails from [person/email] or about [subject]
+    - Summarize this email chain for me
+- Imessage:
+    - Who just texted me?
+    - Did [person] say anything about [subject]?
+    - Has [person] seen my message?
+    - what was the (auth)code that i just got sent for [company, tool, service]
+    - can you let me know when [person, number] texts me?
+    - tell me when [person, number] replies
+    - will you text [person, number] saying [message]
+- web search:
+    - can you find out more about [topic, subject, person] so we can talk about it later
+
+things needed:
+- functionality for storing notes, reminders, performed actions
+- way to notify/talk back to user for reminders or monitoring alerts
+- agent tasks can be performed in various times of the conversations: 
+    - realtime blocking: as the conversation is going, finishing task before moving to output or further processing.
+    - concurrently: kick of the task in an async format and keep processing current input until results come back and gets mixed in before replying.
+    - scheduled: doesnt need to happen right now, need to be done before next session or some other timeframe larger than the current turn/session.
+
+
+
+
+             -> sys02: subconcious  -> 
+user input -|
+             -> sys01: concious     -> 
+
+
+sys02:
+- analysis:
+    - what is this [input] asking?
+    - what is the current context for this input? current conversation transcript + RAG_tool_call into previous conversations instances.
+    - what do i need to know or am not confident about that i need to research to respond to this question? RAG_TOOL_CALL for external info
+
+
+user_input
+    -> tool_call: find relevant snippets from previous interactions
+    -> sys02: internal yapping
+        -> smol_model: what is this [input] asking?
+        -> smol_model: what do I need to know or an not confident about in [input] that i need to research?
+
