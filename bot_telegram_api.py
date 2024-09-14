@@ -20,7 +20,7 @@ def get_session(user_id):
     session = active_sessions.get(user_id)
     if session is None:
         response = requests.post(f"{API_BASE_URL}/chat", json={
-            "model": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+            "model": "meta-llama/llama-3.1-70b-instruct",
             "tokenizer_model": "meta-llama/Meta-Llama-3.1-70B-Instruct"
         })
         if response.status_code == 200:

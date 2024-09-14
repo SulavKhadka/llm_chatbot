@@ -35,6 +35,9 @@ thoughts on tools
 - user message can have link to explore, need to include examples of that too
 - TODO: insert tools into every python interpreter so they can combine and chain the tools as the agents see fit. Also add examples of this demonstrated in the system prompt
 - Add in the message eb entry a column for "sent_to_viewer" to make sure we track which of the generated message actually made it ot the viewer. sometimes the api of the messaging platform or UI might not be responsive or fail at the sending stage.
+- reminder tools and other similar ones for day to day use
+- airport flight tracker given a flight number, save it to a person or not (sam's flight is AM234 or track flight AM345)
+- rag based context retrival: should this be a tool or a more deeply integrated thing
 
 
 active learning

@@ -11,11 +11,88 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
 from langchain_community.utilities import ArxivAPIWrapper
 import random
+import io
 
 from secret_keys import OPENWATHERMAP_API_TOKEN
 from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
+import numpy as np
+from PIL import Image
+import os
+from typing import Union, Dict
 
+@tool
+def open_image_file(filepath: str):
+    """
+    Converts an image file to a NumPy array.
+
+    This tool takes a filepath to an image, attempts to open and process the image,
+    and returns the image data as a NumPy array. It's designed to handle various
+    image formats supported by the Pillow library.
+
+    Args:
+        filepath (str): The full path to the image file. This should be a string
+            representing a valid file path on the system where the code is running.
+
+    Returns:
+        Union[np.ndarray, Dict[str, str]]: 
+        - If successful, returns a NumPy array representing the image data.
+          The shape of the array will be (height, width, channels) for color images,
+          or (height, width) for grayscale images.
+        - If unsuccessful, returns a dictionary with error information:
+          {
+              'status': 'error',
+              'message': 'A description of what went wrong'
+          }
+
+    Raises:
+        This function doesn't raise exceptions directly. All exceptions are caught
+        and returned as error dictionaries.
+
+    Note:
+        - This tool uses the Pillow library to open images, which supports a wide
+          range of formats including JPEG, PNG, GIF, BMP, and more.
+        - The returned NumPy array will have dtype of uint8, with values ranging
+          from 0 to 255.
+        - For color images, the returned array will have 3 channels (RGB) or 4 channels
+          (RGBA) if the image has an alpha channel.
+        - Memory usage can be high for large images, as the entire image is loaded
+          into memory as a NumPy array.
+        - This tool does not modify the original image file.
+
+    Example usage:
+        result = image_to_numpy('/path/to/your/image.jpg')
+        if isinstance(result, np.ndarray):
+            print(f"Successfully loaded image. Shape: {result.shape}")
+        else:
+            print(f"Error: {result['message']}")
+
+    """
+    try:
+        # Check if file exists
+        if not os.path.isfile(filepath):
+            return {
+                'status': 'error',
+                'message': f"File not found: {filepath}"
+            }
+
+        # Attempt to open the image
+        with Image.open(filepath) as img:
+            # Convert image to RGB if it's in a different mode (e.g., RGBA)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+        return img
+
+    except IOError as e:
+        return {
+            'status': 'error',
+            'message': f"IOError: Unable to open image file. {str(e)}"
+        }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': f"An unexpected error occurred: {str(e)}"
+        }
 # create an agent
 @tool
 def get_current_weather(location: str, unit: str) -> str:
@@ -428,9 +505,6 @@ def query_vlm(image_path: str, query: str) -> str:
     except Exception as e:
         return f"An unexpected error occurred: {str(e)}"
 
-
-
-
 def get_tool_list_prompt(tools):
     tool_desc_list = []
     for name, tool_fn in tools.items():
@@ -450,6 +524,7 @@ def get_tools():
         take_screenshots,
         search_pubmed,
         search_arxiv,
+        open_image_file,
         tool(interpreter.run_command),
         tool(interpreter.install_package),
         tool(interpreter.uninstall_package),
