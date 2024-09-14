@@ -56,8 +56,7 @@ async def create_chat(chat_session: ChatSession):
         system=chat_session.system,
         db_config=DB_CONFIG
     )
-    response = chatbots[chat_id]("Hello! This is the start of our conversation.")
-    return ChatResponse(chat_id=chat_id, response=response)
+    return ChatResponse(chat_id=chat_id, response="")
 
 @app.post("/chat/{chat_id}/message", response_model=ChatResponse)
 async def send_message(chat_id: str, message: Message):
