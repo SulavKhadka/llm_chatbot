@@ -13,10 +13,12 @@ import psycopg2
 from psycopg2.extras import Json
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import re
+from prompts import CHAT_SUMMARY_AND_NOTES_PROMPT
+from openai.types.chat.chat_completion import ChatCompletion
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, GROQ_API_KEY
+from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
 
 
 # Configure logfire
@@ -55,9 +57,14 @@ class ChatBot:
         self.total_messages_tokens = 0
 
         self.openai_client = openai.OpenAI(
-            api_key=TOGETHER_AI_TOKEN,
-            base_url="https://api.together.xyz/v1"
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
         )
+
+        # self.openai_client = openai.OpenAI(
+        #     api_key=TOGETHER_AI_TOKEN,
+        #     base_url="https://api.together.xyz/v1"
+        # )
 
         # self.openai_client = openai.OpenAI(
         #     base_url="https://api.groq.com/openai/v1",
@@ -136,7 +143,8 @@ class ChatBot:
                 continue
 
         logger.info({"event": "Assistant_response", "response": response})
-        self._add_message({"role": "assistant", "content": response})
+        message_id = self._add_message({"role": "assistant", "content": response})
+        self._get_chat_summary_and_notes(message_id)
         return response
 
     @classmethod
@@ -206,6 +214,17 @@ class ChatBot:
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_notes (
+                id SERIAL PRIMARY KEY,
+                message_id SERIAL REFERENCES chat_messages(id),
+                chat_id UUID REFERENCES chat_sessions(chat_id),
+                notes TEXT,
+                chat_summary TEXT,
+                metadata JSONB
+            )
+        """)
+
         # Create indexes
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)
@@ -213,6 +232,10 @@ class ChatBot:
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_function_calls_chat_id ON function_calls(chat_id)
+        """)
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_chat_notes_chat_id ON chat_notes(chat_id)
         """)
 
         # Commit changes and close connection
@@ -235,7 +258,6 @@ class ChatBot:
         """, (self.chat_id, message['role'], message['content'], token_count))
         message_id = self.cur.fetchone()[0]
         self.conn.commit()
-        
         logger.debug({"event": "Added_message", "message": message, "token_count": token_count, "total_tokens": self.total_messages_tokens})
         return message_id
 
@@ -267,7 +289,7 @@ class ChatBot:
             user_response += element.text
         if user_response != "":
             parsed_resp['response']['type'] = "USER_RESPONSE"
-            parsed_resp['response']['response'] = user_response
+            parsed_resp['response']['response'] = user_response.strip()
             return parsed_resp 
 
         self_response = ""
@@ -357,6 +379,51 @@ class ChatBot:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
             return '{}'
 
+    def _get_chat_summary_and_notes(self, message_id: str):
+        chat_transcript = ""
+        for turn in self.messages:
+            if turn.get('type', '') == "function_call":
+                pass
+                # print(f"{turn['type']}: {turn['name']}: {turn['parameters']}: {turn['response']}")
+            else:
+                chat_transcript += f"{turn['role'].upper()}:\n{turn['content']}\n"
+        messages = [
+            {"role": "system", "content": CHAT_SUMMARY_AND_NOTES_PROMPT},
+            {"role": "user", "content": f"extract information from the following conversation transcript:\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
+        ]
+        completion = self.get_llm_response(messages, model_name=self.model)
+
+        logger.debug({"event": "parsing_chat_summary_llm_response", "response_text": completion})
+        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
+        xml_root_element = f"<root>{response_text}</root>"
+        
+        try:
+            root = ET.fromstring(xml_root_element)
+        except ET.ParseError as e:
+            logger.error({"event": "failed_chat_summary_parsing", "error": e})
+            raise(e)
+
+        parsed_resp = {
+            "summary": "",
+            "notes": ""
+        }
+
+        summary = []
+        for element in root.findall(".//chat_summary"):
+            summary.append(element.text)
+        parsed_resp['summary'] = "\n".join(summary).strip()
+        
+        notes = []
+        for element in root.findall(".//important_notes"):
+            notes.append(element.text)
+        parsed_resp['notes'] = "\n".join(notes).strip()
+
+        notes_id = self.cur.execute("""
+            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (message_id, self.chat_id, parsed_resp['notes'], parsed_resp['summary'], Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+
     def __del__(self):
         # Close database connection when the object is destroyed
         self.cur.close()
@@ -408,13 +475,20 @@ class ChatBot:
             """, (self.chat_id, purged_message['role'], purged_message['content']))
         self.conn.commit()
 
-    def get_llm_response(self, messages: List[Dict[str, str]], model_name: str) -> str | BaseModel:
+    def get_llm_response(self, messages: List[Dict[str, str]], model_name: str) -> ChatCompletion | BaseModel:
         logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
         chat_completion = self.openai_client.chat.completions.create(
             model=model_name,
             messages=messages,
             max_tokens=self.max_reply_msg_tokens,
-            temperature=0.4
+            temperature=0.4,
+            extra_body= {"provider": {
+                    "order": [
+                        "Avian",
+                        "Together"
+                    ]
+                }
+            }
         )
         logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
         return chat_completion
