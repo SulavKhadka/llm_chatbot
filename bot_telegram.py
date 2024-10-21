@@ -69,7 +69,10 @@ def split_message(message, limit=4096):
                 if len(current_part) + len(part) > limit:
                     if current_part:
                         result.append(current_part.strip())
-                    result.append(part)
+                    if len(part) < 4096:
+                        result.append(part)
+                    else:
+                        result.extend([part[i:i + 4096] for i in range(0, len(part), 4096)])
                     current_part = ""
                 else:
                     current_part += part

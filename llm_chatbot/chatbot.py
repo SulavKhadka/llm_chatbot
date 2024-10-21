@@ -527,7 +527,7 @@ class ChatBot:
 
     def get_llm_response(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
         logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
-        if "openrouter" in self.openai_client.base_url:
+        if "openrouter" in self.openai_client.base_url.host:
             extra_body = extra_body if extra_body is not None else self.open_router_extra_body
         
         chat_completion = self.openai_client.chat.completions.create(
