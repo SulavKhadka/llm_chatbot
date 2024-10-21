@@ -43,9 +43,9 @@ def get_session(user_id):
         active_sessions[user_id] = {
             "chat_id": session_id,
             "llm_bot": chatbot.ChatBot(
-                model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo", 
+                model="qwen/qwen-2.5-72b-instruct", 
                 chat_id=session_id,
-                tokenizer_model="meta-llama/Meta-Llama-3.1-70B-Instruct",
+                tokenizer_model="Qwen/Qwen2.5-72B-Instruct",
                 system=chatbot_system_msg,
                 db_config=db_config
             ),
@@ -75,13 +75,16 @@ def split_message(message, limit=4096):
                     current_part += part
             else:
                 # This is regular text, split by sentences
-                sentences = sent_tokenize(part)
-                for sentence in sentences:
-                    if len(current_part) + len(sentence) > limit:
-                        result.append(current_part.strip())
-                        current_part = sentence + " "
-                    else:
-                        current_part += sentence + " "
+                if len(current_part) + len(part) < limit:
+                    current_part += part + " "
+                else:
+                    sentences = sent_tokenize(part)
+                    for sentence in sentences:
+                        if len(current_part) + len(sentence) > limit:
+                            result.append(current_part.strip())
+                            current_part = sentence + " "
+                        else:
+                            current_part += sentence + " "
         
         if current_part:
             result.append(current_part.strip())

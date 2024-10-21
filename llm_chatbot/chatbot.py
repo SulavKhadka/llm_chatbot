@@ -3,7 +3,7 @@ import datetime
 from transformers import AutoTokenizer
 import openai
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 import ast
 import xml.etree.ElementTree as ET
 from loguru import logger
@@ -13,12 +13,12 @@ import psycopg2
 from psycopg2.extras import Json
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import re
-from prompts import CHAT_SUMMARY_AND_NOTES_PROMPT
 from openai.types.chat.chat_completion import ChatCompletion
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
+from secret_keys import HYPERBOLIC_API_KEY, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
+from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT
 
 
 # Configure logfire
@@ -46,8 +46,8 @@ class ChatBot:
         self.model = model
         self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
         self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
-        self.max_message_tokens = 16384
-        self.max_reply_msg_tokens = 1536
+        self.max_message_tokens = 32768
+        self.max_reply_msg_tokens = 4096
         self.functions = function_tools.get_tools()
 
         self.purged_messages = []
@@ -56,19 +56,21 @@ class ChatBot:
         self.messages_token_counts = []
         self.total_messages_tokens = 0
 
+        # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=OPENROUTER_API_KEY,
         )
+        self.open_router_extra_body = {"provider": {
+                "order": [
+                    "Together"
+                ]
+            }
+        }
 
         # self.openai_client = openai.OpenAI(
-        #     api_key=TOGETHER_AI_TOKEN,
-        #     base_url="https://api.together.xyz/v1"
-        # )
-
-        # self.openai_client = openai.OpenAI(
-        #     base_url="https://api.groq.com/openai/v1",
-        #     api_key=GROQ_API_KEY
+        #     base_url="http://0.0.0.0:8000/v1",
+        #     api_key="token123",
         # )
 
         if db_config is None:
@@ -144,7 +146,7 @@ class ChatBot:
 
         logger.info({"event": "Assistant_response", "response": response})
         message_id = self._add_message({"role": "assistant", "content": response})
-        self._get_chat_summary_and_notes(message_id)
+        # self._get_chat_notes(message_id=message_id)
         return response
 
     @classmethod
@@ -379,21 +381,31 @@ class ChatBot:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
             return '{}'
 
-    def _get_chat_summary_and_notes(self, message_id: str):
+    def _get_chat_notes(self, message_id: str):
+
+        self.cur.execute("""
+                    SELECT notes FROM public.chat_notes
+                    WHERE chat_id=%s
+                    ORDER BY id DESC LIMIT 1
+                """, (self.chat_id,))
+        previous_notes = self.cur.fetchone()
+        previous_notes = previous_notes[0] if previous_notes is not None else ""
+
         chat_transcript = ""
         for turn in self.messages:
             if turn.get('type', '') == "function_call":
                 pass
                 # print(f"{turn['type']}: {turn['name']}: {turn['parameters']}: {turn['response']}")
             else:
-                chat_transcript += f"{turn['role'].upper()}:\n{turn['content']}\n"
+                if turn['role'].lower() != "system":
+                    chat_transcript += f"{turn['role'].upper()}:\n{turn['content']}\n"
         messages = [
-            {"role": "system", "content": CHAT_SUMMARY_AND_NOTES_PROMPT},
-            {"role": "user", "content": f"extract information from the following conversation transcript:\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
+            {"role": "system", "content": CHAT_NOTES_PROMPT},
+            {"role": "user", "content": f"extract information from the following conversation:\n<previous_notes>{previous_notes}</previous_notes>\n\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
         ]
         completion = self.get_llm_response(messages, model_name=self.model)
 
-        logger.debug({"event": "parsing_chat_summary_llm_response", "response_text": completion})
+        logger.debug({"event": "parsing_chat_notes_llm_response", "response_text": completion})
         response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
         xml_root_element = f"<root>{response_text}</root>"
         
@@ -404,37 +416,75 @@ class ChatBot:
             raise(e)
 
         parsed_resp = {
-            "summary": "",
             "notes": ""
         }
-
-        summary = []
-        for element in root.findall(".//chat_summary"):
-            summary.append(element.text)
-        parsed_resp['summary'] = "\n".join(summary).strip()
         
         notes = []
-        for element in root.findall(".//important_notes"):
-            notes.append(element.text)
-        parsed_resp['notes'] = "\n".join(notes).strip()
+        for element in root.find(".//important_notes"):
+            if element.tag == "note":
+                notes.append(element.text)
+        parsed_resp['notes'] = (previous_notes + "\n" + "\n".join(notes).strip()).strip()
 
         notes_id = self.cur.execute("""
             INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
             VALUES (%s, %s, %s, %s, %s)
             RETURNING id
-        """, (message_id, self.chat_id, parsed_resp['notes'], parsed_resp['summary'], Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+        self.conn.commit()
+
+    def _get_session_notes(self, message_id: str):
+        self.cur.execute("""
+                    SELECT notes FROM public.chat_notes
+                    WHERE chat_id=%s
+                    ORDER BY id DESC LIMIT 1
+                """, (self.chat_id,))
+        latest_session_notes = self.cur.fetchone()
+        latest_session_notes = latest_session_notes[0] if latest_session_notes is not None else ""
+
+        messages = [
+            {"role": "system", "content": CHAT_SESSION_NOTES_PROMPT},
+            {"role": "user", "content": f"<chat_session_notes>{latest_session_notes}</chat_session_notes>"}
+        ]
+        completion = self.get_llm_response(messages, model_name=self.model)
+
+        logger.debug({"event": "parsing_session_end_notes_llm_response", "response_text": completion})
+        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
+        xml_root_element = f"<root>{response_text}</root>"
+        
+        try:
+            root = ET.fromstring(xml_root_element)
+        except ET.ParseError as e:
+            logger.error({"event": "failed_session_final_notes_parsing", "error": e})
+            raise(e)
+
+        parsed_resp = {
+            "notes": ""
+        }
+        
+        notes = []
+        for element in root.find(".//important_notes"):
+            if element.tag == "note":
+                notes.append(element.text)
+        parsed_resp['notes'] = (latest_session_notes + "\n" + "\n".join(notes).strip()).strip()
+
+        notes_id = self.cur.execute("""
+            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+        self.conn.commit()
 
     def __del__(self):
+        self._get_session_notes(f"{self.chat_id}_final_session_notes")
         # Close database connection when the object is destroyed
         self.cur.close()
         self.conn.close()
 
     def execute(self):
-        self.system['content'] = re.sub(pattern='<current_realtime_info>.*</current_realtime_info>', repl='', string=self.system['content'])
+        self.system['content'] = re.sub(pattern='<current_realtime_info>\n.*\n</current_realtime_info>', repl='', string=self.system['content'])
         current_info = f'''
 <current_realtime_info>
 - Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-- Location: Seattle Home Server
 </current_realtime_info>'''
         self.system['content'] += current_info
         
@@ -475,20 +525,17 @@ class ChatBot:
             """, (self.chat_id, purged_message['role'], purged_message['content']))
         self.conn.commit()
 
-    def get_llm_response(self, messages: List[Dict[str, str]], model_name: str) -> ChatCompletion | BaseModel:
+    def get_llm_response(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
         logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
+        if "openrouter" in self.openai_client.base_url:
+            extra_body = extra_body if extra_body is not None else self.open_router_extra_body
+        
         chat_completion = self.openai_client.chat.completions.create(
             model=model_name,
             messages=messages,
             max_tokens=self.max_reply_msg_tokens,
             temperature=0.4,
-            extra_body= {"provider": {
-                    "order": [
-                        "Avian",
-                        "Together"
-                    ]
-                }
-            }
+            extra_body= extra_body
         )
         logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
         return chat_completion
