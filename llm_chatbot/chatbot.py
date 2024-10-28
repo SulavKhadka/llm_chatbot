@@ -227,18 +227,50 @@ class ChatBot:
             )
         """)
 
+        # Create the Trigger Function
+        cur.execute("""
+            CREATE OR REPLACE FUNCTION update_chat_sessions_timestamp()
+            RETURNS TRIGGER AS $$
+            BEGIN
+                -- Update only the `updated_at` column in the corresponding `chat_sessions` record
+                UPDATE chat_sessions
+                SET updated_at = CURRENT_TIMESTAMP
+                WHERE chat_id = NEW.chat_id;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+
         # Create indexes
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)
         """)
+        cur.execute("""
+                CREATE TRIGGER trigger_update_chat_sessions_timestamp_chat_messages
+                AFTER INSERT ON chat_messages
+                FOR EACH ROW
+                EXECUTE FUNCTION update_chat_sessions_timestamp();
+            """)
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_function_calls_chat_id ON function_calls(chat_id)
         """)
+        cur.execute("""
+                CREATE TRIGGER trigger_update_chat_sessions_timestamp_function_calls
+                AFTER INSERT ON function_calls
+                FOR EACH ROW
+                EXECUTE FUNCTION update_chat_sessions_timestamp();
+            """)
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_notes_chat_id ON chat_notes(chat_id)
         """)
+        cur.execute("""
+                CREATE TRIGGER trigger_update_chat_sessions_timestamp_chat_notes
+                AFTER INSERT ON chat_notes
+                FOR EACH ROW
+                EXECUTE FUNCTION update_chat_sessions_timestamp();
+            """)
 
         # Commit changes and close connection
         conn.commit()
