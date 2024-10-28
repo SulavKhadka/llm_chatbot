@@ -99,14 +99,31 @@ Output:
 3. Missing closing tag:
 Input:
 <llm_response_content>
-<thought>The user asked about the population of Tokyo.</thought>
-<response_to_user>As of 2021, the estimated population of Tokyo is approximately 14 million people.
+<thought>
+I'll use the `run_python_code` tool to execute the provided Python code.
+</thought>
+<tool_call>
+{
+    "name": "run_python_code",
+    "parameters": {
+        "code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"
+    }
+}
 </llm_response_content>
 
 Output:
 <corrected_response>
-<thought>The user asked about the population of Tokyo.</thought>
-<response_to_user>As of 2021, the estimated population of Tokyo is approximately 14 million people.</response_to_user>
+<thought>
+I'll use the `run_python_code` tool to execute the provided Python code.
+</thought>
+<tool_call>
+{
+    "name": "run_python_code",
+    "parameters": {
+        "code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"
+    }
+}
+</tool_call>
 </corrected_response>
 
 4. Incorrect nesting of tags:
@@ -173,14 +190,14 @@ Remember, your role is to ensure proper XML structure and tag usage, not to modi
     )
 
     llm_output = sanitize_inner_content(chat_completion.choices[0].message.content)
-    xml_root_element = f"<root>{llm_output}</root>"
+    xml_root_element = f"""<root>{llm_output}</root>"""
     try:
         root = ET.fromstring(xml_root_element)
     except ET.ParseError as e:
         return ET.fromstring("<root></root>")
 
     corrected_response = root.find('.//corrected_response')
-    corrected_response = corrected_response.text.strip() if corrected_response is not None else ""
+    corrected_response = ''.join(ET.tostring(child, encoding='unicode') for child in corrected_response) if corrected_response is not None else ""
     if corrected_response != "":
         return ET.fromstring(f"<root>{corrected_response}</root>")
     else:
