@@ -130,8 +130,7 @@ def get_current_weather(location: str, unit: str) -> str:
 
     Note:
         This tool requires a valid OpenWeatherMap API key to be set in the environment variables. 
-        It uses the Nominatim geocoder to convert location names to coordinates, which may not work 
-        for all location inputs. For best results, use clear and unambiguous location names.
+        For best results, use clear and unambiguous location names.
     """
     # API endpoint
     base_url = "http://api.openweathermap.org/data/2.5/weather"
@@ -188,15 +187,14 @@ def web_search(query: str):
 
     This tool conducts a web search using the provided query and returns a list of relevant search results. 
     It's useful for gathering information on a wide range of topics, finding recent news, or discovering 
-    websites related to a specific subject. The search is performed using a web search API, which provides 
-    access to a large index of web pages.
+    websites related to a specific subject.
 
     Args:
-        query (str): The search query string. This should be a clear and concise description of the 
-            information you're looking for. More specific queries tend to yield more relevant results.
+        query (str): The search query string. A clear and concise description of the information you're
+            looking for. More specific queries tend to yield more relevant results.
 
     Returns:
-        list: A list of dictionaries, where each dictionary represents a single search result. 
+        List[Dict]: A list of dictionaries, where each dictionary represents a single search result. 
         Each dictionary contains the following keys:
             - title (str): The title of the web page or document.
             - url (str): The full URL of the web page or document.
@@ -204,11 +202,7 @@ def web_search(query: str):
               relevant parts of the text that match the search query.
 
     Note:
-        - The number of results returned may vary depending on the search API's settings and the 
-          specificity of the query.
         - The tool does not provide the full content of web pages, only summaries and links.
-        - Search results are based on the current index of the search API and may not include 
-          very recent information.
         - The relevance and order of results are determined by the search API's algorithms and 
           may not always perfectly match the user's intentions.
     """
@@ -219,9 +213,10 @@ def web_search(query: str):
         for result in results["web"]["results"]:
             formatted_results.append(
                 {
-                    "title": result.get("title", ""),
-                    "url": result.get("url", ""),
-                    "description": result.get("description", ""),
+                    "title": result.get("title", "N/A"),
+                    "url": result.get("url", "N/A"),
+                    "description": result.get("description", "N/A"),
+                    "age": result.get("age", "N/A")
                 }
             )
     return formatted_results
@@ -231,10 +226,8 @@ def take_screenshots(save=False):
     """
     Capture screenshots of all monitors and return them as PIL Image objects.
 
-    This tool uses the MSS (Multiple Screen Shot) library to capture screenshots from all available 
-    monitors connected to the system. It's useful for documenting the current state of all displays, 
-    which can be helpful for troubleshooting, creating tutorials, or recording visual information 
-    across multiple screens.
+    This tool captures screenshots from all available monitors connected to the system. 
+    It's useful for capturing the content of the local screen, for visual navigation and problem solving.
 
     Args:
         save (bool, optional): If True, each screenshot will be saved as a PNG file in the current 
@@ -250,7 +243,6 @@ def take_screenshots(save=False):
         - The tool captures the entire area of each monitor, including all visible windows and the desktop.
         - If 'save' is True, screenshots are saved with filenames that include the monitor number and a 
           timestamp, e.g., "screenshot_monitor2_20230615_120530.png".
-        - The number of screenshots returned depends on the number of monitors connected to the system.
         - This tool may not work as expected in all environments, particularly those without a graphical 
           interface or with unusual monitor configurations.
         - The returned Image objects can be further processed or analyzed using PIL (Python Imaging Library) 
@@ -311,60 +303,6 @@ def generate_image():
     pass
 
 @tool
-def add_2_nums(x: int, y: int) -> int:
-    """
-    Add two numbers and return the sum.
-
-    This tool performs simple addition of two integers. It's useful for basic arithmetic operations 
-    when you need to combine two numerical values. While simple, it ensures accurate addition without 
-    the risk of floating-point errors that can occur with some manual calculations.
-
-    Args:
-        x (int): The first integer to be added. This can be any positive or negative whole number.
-        y (int): The second integer to be added. This can be any positive or negative whole number.
-
-    Returns:
-        int: The sum of x and y. This will always be an integer.
-
-    Note:
-        - This function only works with integers. If you need to add floating-point numbers, you'll need to use a different tool.
-        - The function does not have a limit on the size of integers it can handle beyond Python's built-in integer limits.
-        - If the result of the addition exceeds the maximum integer size that can be represented in Python, an OverflowError may occur.
-        - This tool does not perform any rounding or truncation; it returns the exact sum of the two input integers.
-    """
-
-    return x+y
-
-@tool
-def get_random_number(st: int = 1, end: int = 100) -> int:
-    """
-    Generate a random integer within a specified range.
-
-    This tool produces a random integer between two given values (inclusive). It's useful for simulations, 
-    games, or any situation where you need an element of randomness or unpredictability. The tool uses 
-    Python's random module to ensure a uniform distribution of results.
-
-    Args:
-        st (int, optional): The start of the range (inclusive). Must be less than or equal to 'end'. 
-            Defaults to 1 if not specified.
-        end (int, optional): The end of the range (inclusive). Must be greater than or equal to 'st'. 
-            Defaults to 100 if not specified.
-
-    Returns:
-        int: A random integer N where st <= N <= end.
-
-    Note:
-        - The returned number is inclusive of both 'st' and 'end'.
-        - If 'st' and 'end' are the same, that number will always be returned.
-        - If 'st' is greater than 'end', the function will raise a ValueError.
-        - This function uses Python's random.randrange(), which is suitable for most purposes but is not 
-          cryptographically secure. For applications requiring high-security random numbers, a different tool should be used.
-        - The distribution of returned numbers is uniform, meaning each number in the range has an equal probability of being chosen.
-        - There's no upper limit to the range size other than Python's integer limits, but very large ranges may impact performance.
-    """
-    return random.randrange(st, end)
-
-@tool
 def search_pubmed(query: str, max_result_chars: int = 2500):
     """
     Search PubMed database and return formatted results.
@@ -410,9 +348,8 @@ def search_arxiv(query: str, max_result_chars: int = 2500):
     Search arXiv database and return formatted results.
 
     This tool performs a search query on the arXiv database, which is an open-access archive for scholarly 
-    articles in fields such as physics, mathematics, computer science, quantitative biology, quantitative 
-    finance, statistics, electrical engineering and systems science, and economics. It's particularly useful 
-    for finding pre-print and published research papers across these disciplines.
+    articles in STEM fields. It's particularly useful for finding pre-print and published research papers
+    across these disciplines.
 
     Args:
         query (str): The search query string. This should be a clear and concise description of the topic 
@@ -432,7 +369,6 @@ def search_arxiv(query: str, max_result_chars: int = 2500):
         - URL to the full paper
 
     Note:
-        - The number of results returned may be limited by the arXiv API and the max_result_chars parameter.
         - Results are typically sorted by relevance and date, with the most recent and most relevant 
           papers appearing first.
         - This tool provides access to scholarly articles which may be highly technical. Interpretation 
@@ -470,15 +406,9 @@ def query_vlm(image_path: str, query: str) -> str:
         will describe what went wrong during the process.
 
     Note:
-        - This function requires the PIL (Python Imaging Library) to be installed and imported as 'Image'.
-        - The function assumes the existence of a separate 'query_image' function that takes a PIL Image 
-          object and a query string as inputs. Make sure this function is properly defined and imported.
         - The performance and accuracy of the results depend on the underlying Vision Language Model, 
           which is not specified in this function.
-        - Large images may require significant processing time and memory.
         - The function does not modify the original image file.
-        - Ensure that you have the necessary permissions to access the image file.
-        - The Vision Language Model may have limitations on the types of queries it can accurately respond to.
         - If an error occurs (e.g., file not found, invalid image format, empty inputs), the function 
           will return an error message as a string rather than raising an exception.
     """
@@ -522,12 +452,9 @@ def get_tools():
         get_current_weather,
         web_search,
         take_screenshots,
-        search_pubmed,
         search_arxiv,
         open_image_file,
         tool(interpreter.run_command),
-        tool(interpreter.install_package),
-        tool(interpreter.uninstall_package),
         tool(interpreter.run_python_code)
     ]
     for fn in functions:

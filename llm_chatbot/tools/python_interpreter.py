@@ -370,7 +370,8 @@ class UVPythonShellManager:
 
         This method allows running arbitrary Python code in the context of a 
         virtual environment session. It's useful for testing code snippets,
-        running scripts, or interacting with installed packages.
+        running scripts, or data analysis and problem solving.
+        All results need to be printed or saved to a file and then the path printed.
 
         Args:
             code (str): The Python code to execute. Can be a single line or 
