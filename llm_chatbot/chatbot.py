@@ -14,10 +14,12 @@ from psycopg2.extras import Json
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import re
 from openai.types.chat.chat_completion import ChatCompletion
+from uuid import uuid4
+import requests
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import HYPERBOLIC_API_KEY, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
+from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
 from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT
 
 
@@ -40,22 +42,12 @@ logger.add(
 )
 
 class ChatBot:
-    def __init__(self, model, chat_id, tokenizer_model="", system="", db_config=None):
-        self.chat_id = chat_id
-        self.system = {"role": "system", "content": system}
-        self.model = model
-        self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
-        self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
+    def __init__(self, model, chat_id=None, tokenizer_model="", system="", db_config=None):
+
         self.max_message_tokens = 32768
         self.max_reply_msg_tokens = 4096
+        self.max_recurse_depth = 10
         self.functions = function_tools.get_tools()
-
-        self.purged_messages = []
-        self.purged_messages_token_count = []
-        self.messages = []
-        self.messages_token_counts = []
-        self.total_messages_tokens = 0
-
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
             base_url="https://openrouter.ai/api/v1",
@@ -67,12 +59,6 @@ class ChatBot:
                 ]
             }
         }
-
-        # self.openai_client = openai.OpenAI(
-        #     base_url="http://0.0.0.0:8000/v1",
-        #     api_key="token123",
-        # )
-
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
@@ -83,50 +69,68 @@ class ChatBot:
             }
         
         global logger
-        logger = logger.bind(chat_id=self.chat_id)
+        if chat_id is None:
+            self.chat_id = str(uuid4())
+            logger.bind(chat_id=self.chat_id)
+            
+            # Database connection
+            self.initialize_db(**db_config)
+            self.conn = psycopg2.connect(**db_config)
+            self.cur = self.conn.cursor()
+            
+            self._create_session(model, self.chat_id, tokenizer_model, system, db_config)
+        else:
+            self.chat_id = chat_id
+            logger.bind(chat_id=self.chat_id)
 
-        # Initialize database if it doesn't exist
-        self.initialize_db(**db_config)
-        
-        # Database connection
-        self.conn = psycopg2.connect(**db_config)
-        self.cur = self.conn.cursor()
-        
-        # Insert new chat session
-        self.cur.execute("""
-            INSERT INTO chat_sessions (chat_id, model, tokenizer_model, system_message)
-            VALUES (%s, %s, %s, %s)
-        """, (self.chat_id, self.model, self.tokenizer_model, system))
-        self.conn.commit()
+            # Database connection
+            self.initialize_db(**db_config)
+            self.conn = psycopg2.connect(**db_config)
+            self.cur = self.conn.cursor()
 
-        self._add_message(self.system)
-        logger.info({"event": "ChatBot_initialized", "model": model})
-        logger.debug({"event": "Initial_system_message", "system_message": self.system})
+            # Load chat session metadata
+            self.cur.execute("""
+                SELECT model, tokenizer_model, system_message 
+                FROM chat_sessions 
+                WHERE chat_id = %s
+            """, (chat_id,))
+            session_data = self.cur.fetchone()
+            if not session_data:
+                logger.debug({"event": "chat_id not found", "chat_id": chat_id})
+                logger.info({"event": "chat_id not found", "message": "chat_id: {chat_id} not found. Creating new one under the provided chat_id: {chat_id}"})
+                self._create_session(model, self.chat_id, tokenizer_model, system, db_config)
+            else:
+                self._load_session(self.chat_id, session_data)
 
     def __call__(self, message):
         logger.info({"event": "Received_user_message", "message": message})
         self._add_message({"role": "user", "content": message})
 
         self_recurse = True
-        while self_recurse:
+        recursion_counter = 0
+        while self_recurse and recursion_counter < self.max_recurse_depth:
             self.rolling_memory()
-            completion = self.execute()
-
-            parsed_response = self._parse_results(completion.choices[0].message.content)
+            try:
+                completion = self.execute()
+                parsed_response = self._parse_results(completion.choices[0].message.content)
+            except Exception as e:
+                completion = f"<thought>looks like there was an error in my execution while processing user response</thought><internal_response>Error Details:\n\n{e}</internal_response>"
+                parsed_response = self._parse_results(completion)
             
+            recursion_counter += 1
             llm_thought = f"<thought>\n{parsed_response['thought']}\n</thought>"
 
             if parsed_response['response']['type'] == "TOOL_CALL":
                 tool_calls = parsed_response['response']['response']
                 self._add_message({"role": "assistant", "content": f"{llm_thought}\n<tool_call>\n{parsed_response['response']['response']}\n</tool_call>"})
+                
                 if len(tool_calls) > 0:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
                     tool_call_responses = []
                     for tool_call in tool_calls:
                         fn_response = self._execute_function_call(tool_call)
                         tool_call_responses.append(fn_response)
-                    tool_response_str = '\n'.join(tool_call_responses)
-                    self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_response_str}\n</tool_call_response>"})
+                    self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_call_responses}\n</tool_call_response>"})
                     continue
                 else:
                     self_recurse = False
@@ -138,10 +142,6 @@ class ChatBot:
 
             if parsed_response['response']['type'] == "SELF_RESPONSE":
                 self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>\n{parsed_response['response']['response']}\n</internal_response>"})
-                continue
-
-            if parsed_response['response']['type'] == "PLAN":
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<plan>\n{parsed_response['response']['response']}\n</plan>"})
                 continue
 
         logger.info({"event": "Assistant_response", "response": response})
@@ -245,32 +245,35 @@ class ChatBot:
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)
         """)
-        cur.execute("""
-                CREATE TRIGGER trigger_update_chat_sessions_timestamp_chat_messages
-                AFTER INSERT ON chat_messages
-                FOR EACH ROW
-                EXECUTE FUNCTION update_chat_sessions_timestamp();
-            """)
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_function_calls_chat_id ON function_calls(chat_id)
         """)
-        cur.execute("""
-                CREATE TRIGGER trigger_update_chat_sessions_timestamp_function_calls
-                AFTER INSERT ON function_calls
-                FOR EACH ROW
-                EXECUTE FUNCTION update_chat_sessions_timestamp();
-            """)
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_chat_notes_chat_id ON chat_notes(chat_id)
         """)
-        cur.execute("""
-                CREATE TRIGGER trigger_update_chat_sessions_timestamp_chat_notes
-                AFTER INSERT ON chat_notes
-                FOR EACH ROW
-                EXECUTE FUNCTION update_chat_sessions_timestamp();
-            """)
+
+        tables_to_trigger = ['chat_notes', 'chat_messages', 'function_calls']  # Add other tables as needed
+
+        for table in tables_to_trigger:
+            trigger_name = f"trigger_update_chat_sessions_timestamp_{table}"
+            check_query = f"""
+                DO $$ 
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 
+                        FROM pg_trigger 
+                        WHERE tgname = '{trigger_name}'
+                    ) THEN
+                        CREATE TRIGGER {trigger_name}
+                        AFTER INSERT ON {table}
+                        FOR EACH ROW
+                        EXECUTE FUNCTION update_chat_sessions_timestamp();
+                    END IF;
+                END $$;
+            """
+            cur.execute(check_query)
 
         # Commit changes and close connection
         conn.commit()
@@ -278,6 +281,112 @@ class ChatBot:
         conn.close()
 
         logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
+
+    def _create_session(self, model, chat_id, tokenizer_model, system, db_config):
+        self.chat_id = chat_id
+        self.system = {"role": "system", "content": system}
+        self.model = model
+        self.tokenizer_model = tokenizer_model if tokenizer_model != "" else model
+        self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
+        self.purged_messages = []
+        self.purged_messages_token_count = []
+        self.messages = []
+        self.messages_token_counts = []
+        self.total_messages_tokens = 0
+
+        # self.openai_client = openai.OpenAI(
+        #     base_url="http://0.0.0.0:8000/v1",
+        #     api_key="token123",
+        # )
+
+        self.cur.execute("""
+            INSERT INTO chat_sessions (chat_id, model, tokenizer_model, system_message)
+            VALUES (%s, %s, %s, %s)
+        """, (self.chat_id, self.model, self.tokenizer_model, self.system["content"]))
+        self.conn.commit()
+        
+        # Add initial system message
+        self._add_message(self.system)
+        logger.info({
+            "event": "ChatBot_initialized",
+            "model": self.model,
+            "session_type": "new",
+            "chat_id": str(self.chat_id)
+        })
+        logger.debug({"event": "Initial_system_message", "system_message": self.system})
+    
+    def _load_session(self, chat_id: str, session_data: List):
+        """
+        Reconstructs the complete chat session state from the database using the chat_id.
+        Must be called right after ChatBot.__init__() to load an existing session.
+        
+        Args:
+            chat_id (str): UUID of the chat session to load
+        """
+
+        # Reset any existing state
+        self.purged_messages = []
+        self.purged_messages_token_count = []
+        self.messages = []
+        self.messages_token_counts = []
+        self.total_messages_tokens = 0
+        
+        # Update instance variables with session data
+        self.model = session_data[0]
+        self.tokenizer_model = session_data[1]
+        self.system = {"role": "system", "content": session_data[2]}
+        
+        # Reinitialize tokenizer with correct model
+        if self.tokenizer_model:
+            self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_model)
+        
+        # Load all messages in chronological order
+        self.cur.execute("""
+            SELECT role, content, token_count, is_purged, created_at 
+            FROM chat_messages 
+            WHERE chat_id = %s 
+            ORDER BY created_at, id
+        """, (chat_id,))
+        messages = self.cur.fetchall()
+        
+        # Reconstruct messages and token counts
+        for role, content, token_count, is_purged, _ in messages:
+            message = {"role": role, "content": content}
+            
+            if is_purged:
+                self.purged_messages.append(message)
+                self.purged_messages_token_count.append(token_count)
+            else:
+                self.messages.append(message)
+                self.messages_token_counts.append(token_count)
+                self.total_messages_tokens += token_count
+        
+        # Load latest chat notes
+        self.cur.execute("""
+            SELECT notes, chat_summary, metadata 
+            FROM chat_notes 
+            WHERE chat_id = %s 
+            ORDER BY id DESC 
+            LIMIT 1
+        """, (chat_id,))
+        notes_data = self.cur.fetchone()
+        
+        # No need to store notes in instance variables as they're only used 
+        # when explicitly requested via _get_chat_notes() or _get_session_notes()
+        
+        logger.info({
+            "event": "Session_loaded",
+            "chat_id": chat_id,
+            "active_messages": len(self.messages),
+            "purged_messages": len(self.purged_messages),
+            "total_tokens": self.total_messages_tokens
+        })
+        logger.debug({
+            "event": "Session_state",
+            "active_messages": self.messages,
+            "purged_messages": self.purged_messages
+        })
+        logger.info({"event": "ChatBot_initialized", "model": self.model})
 
     def _add_message(self, message):
         self.messages.append(message)
@@ -298,7 +407,7 @@ class ChatBot:
     def _parse_results(self, response_text: str):
         logger.debug({"event": "Parsing_llm_response", "response_text": response_text})
         response_text = utils.sanitize_inner_content(response_text)
-        xml_root_element = f"<root>{response_text}</root>"
+        xml_root_element = f"""<root>{response_text}</root>"""
         
         try:
             root = ET.fromstring(xml_root_element)
@@ -411,7 +520,7 @@ class ChatBot:
             return results_dict
         else:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
-            return '{}'
+            return f'{{"name": "{function_name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
     def _get_chat_notes(self, message_id: str):
 
@@ -561,13 +670,29 @@ class ChatBot:
         logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
         if "openrouter" in self.openai_client.base_url.host:
             extra_body = extra_body if extra_body is not None else self.open_router_extra_body
-        
-        chat_completion = self.openai_client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            max_tokens=self.max_reply_msg_tokens,
-            temperature=0.4,
-            extra_body= extra_body
-        )
+        try:
+            chat_completion = self.openai_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=self.max_reply_msg_tokens,
+                temperature=0.4,
+                extra_body= extra_body
+            )
+        except Exception as e:
+            if e['code'] == 'model_not_available':
+                pass
+            else:
+                raise
         logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
         return chat_completion
+
+    def get_working_llm_service(self, model_name: str):
+        if "together.ai" in self.openai_client.base_url:
+            headers = {"accept": "application/json", "authorization": f"Bearer {TOGETHER_AI_TOKEN}"}
+            resp = requests.get("https://api.together.xyz/v1/models?type=language", headers=headers)
+            if resp.status_code == 200:
+                models = resp.json()
+                filtered_models = []
+                
+                for model in models:
+                    ctx_len = model.get("context_length", None)

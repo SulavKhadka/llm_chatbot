@@ -31,7 +31,7 @@ things needed:
 - way to notify/talk back to user for reminders or monitoring alerts
 - agent tasks can be performed in various times of the conversations: 
     - realtime blocking: as the conversation is going, finishing task before moving to output or further processing.
-    - concurrently: kick of the task in an async format and keep processing current input until results come back and gets mixed in before replying.
+    - concurrently: kick off the task in an async format and keep processing current input until results come back and gets mixed in before replying.
     - scheduled: doesnt need to happen right now, need to be done before next session or some other timeframe larger than the current turn/session.
 
 
@@ -54,4 +54,24 @@ user_input
     -> sys02: internal yapping
         -> smol_model: what is this [input] asking?
         -> smol_model: what do I need to know or an not confident about in [input] that i need to research?
+
+
+
+
+BUGS:
+- sys message gets pasted twice
+- if the system fails to response and we send another message, two user messages get added back to back, Need to add try catch and make the assistant response a internal error
+- when loading a session state back after X time. the same openai_client might not be serving the backend(or shouldnt be required to) so instead of failing we should be able to switch over to the same model on a different provider or in the case of the model not being available across providers, continue on with one that is available.
+
+
+
+metadata per message: this granularity is required to give the agent context of time and conversation patterns(maybe even let it decide how long it wants to wait to respond instead of always responding immediately)
+    CURRENT_DATETIME
+    OUTPUT_MODALITY (for assistant responses)
+    INPUT_MODALITY (for user inputs)
+
+
+Can the bot handle this scenario?
+- for the next hour, every 5 mins, get the current weather and wind conditions and then alert me only if the wind is blowing above 10mph and temp is below 50F.
+    - this needs to track and have a non user trigger to the bot loop, as well as an option to not respond until a crietria is met.
 
