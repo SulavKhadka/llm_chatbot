@@ -44,10 +44,10 @@ Respond with your final list in the following format:
 
 TOOLS_PROMPT_SNIPPET = '''
 ## Tools/Function calling Instructions:
-- You are provided with function signatures within <tools></tools> XML tags. Those are all the tools at your disposal.
+- You are provided with function signatures within <tools></tools> XML tags. Below these instructions are all the tools at your disposal listed under the heading "##Available tools".
 - When using tool, always respond in the format <tool_call>[{{"name": function name, "parameters": dictionary of function arguments}}]</tool_call>. The tool call must always be a list of dictionaries(one per tool call) that is valid JSON. Do not use variables. 
-- Don't make assumptions about what values to plug into function arguments, always refer to the function signatures. Include all the required parameters in the tool call. If you dont have information for the required parameters ask the user before calling the tool.
-- Tool/Function calls are an intermediate response that the user wont see, its for an intermediate agent called TOOL to parse so respond only with the functions you want to run inside <tool_call></tool_call> tags in the format shown above. This is very critical to follow.
+- Always refer to the function signatures for argument parameters. Include all the required parameters in the tool call. If you dont have information for the required parameters ask the user before calling the tool.
+- Tool/Function calls are an intermediate response that the user wont see, its for an intermediate agent called 'Tool' to parse so respond only with the functions you want to run inside <tool_call></tool_call> tags in the format shown above. This is very critical to follow.
 - Once the tool call is executed, the response will be given back to you by TOOL inside of the tags <tool_call_response></tool_call_response>, you should use that to formulate your next step.
 
 ## Available Tools:
@@ -57,6 +57,10 @@ TOOLS_PROMPT_SNIPPET = '''
 '''
 
 RESPONSE_FLOW_2 = '''## Example Reference Dialogues:
+<available_tools_for_diagloue_examples>
+[get_current_weather, web_search, add_2_nums, get_random_number]
+</available_tools_for_diagloue_examples>
+
 <dialogue_example>
    User: "What's the weather like today?"
    Assistant:
@@ -64,11 +68,11 @@ RESPONSE_FLOW_2 = '''## Example Reference Dialogues:
    This is a straightforward question about current weather. I don't have real-time data, so I'll need to use a tool to get this information. However, I should first consider what location the user might be referring to.
    </thought>
    <internal_response>
-   I realize I don't have the user's location. I should ask for clarification before making a tool call.
+   I don't have the user's location. I should ask for clarification before making a tool call.
    </internal_response>
    Assistant:
    <thought>
-   I've decided I need more information from the user before I can accurately answer their question.
+   I need more information from the user before I can accurately answer their question.
    </thought>
    <response_to_user>
    I'd be happy to check the weather for you. Could you please specify your location so I can provide accurate information?
@@ -76,18 +80,18 @@ RESPONSE_FLOW_2 = '''## Example Reference Dialogues:
    User: "I'm in New York City."
    Assistant:
    <thought>
-   Now that I have the location, I can proceed with a tool call to get the current weather information for New York City.
+   Now that I have the location, I'm gonna call get_current_weather tool to get the current weather information for New York City.
    </thought>
    <tool_call>
    [{"name": "weather_api", "parameters": {"location": "New York City"}}]
    </tool_call>
    Tool:
    <tool_call_response>
-   ['{"name": "weather_api", "content": "Invalid function name. Either None or not in the list of supported functions."}']
+   '[{"name": "weather_api", "content": "Invalid function name. Either None or not in the list of supported functions."}]'
    </tool_call_response>
    Assistant:
    <thought>
-   looks like the tool i was calling isnt available. I should check if its in my tools list. Now, I see where i went wrong, the tool available in my tools list is get_current_weather not weather_api. Let me try again
+   looks like the tool i was calling isnt available. Now, I see where i went wrong, the tool available in my tools list is get_current_weather not weather_api. Let me try again
    </thought>
    <tool_call>
    [{{'name': 'get_current_weather', 'parameters': {{'location': 'New York City, NY', 'unit': 'metric'}}}}]
