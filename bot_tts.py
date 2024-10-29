@@ -119,7 +119,7 @@ class SpeechSegmenter:
                         self.is_speaking = False
                         final_output = self.online.finish()
                         if final_output[2]:  # If there's text
-                            self.all_segments.append(final_output)
+                            self.all_segments.append(final_output[2])
 
                         user_input_segment = "".join(self.all_segments)
                         print("\nSpeech segment complete.\nUser:", user_input_segment)
@@ -153,7 +153,7 @@ class SpeechSegmenter:
             # Process any remaining audio
             final_output = self.online.finish()
             if final_output[2]:
-                self.all_segments.append(final_output)
+                self.all_segments.append(final_output[2])
 
             print("\nAll captured segments:")
             for i, segment in enumerate(self.all_segments, 1):
