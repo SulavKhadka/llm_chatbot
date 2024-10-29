@@ -294,11 +294,6 @@ class ChatBot:
         self.messages_token_counts = []
         self.total_messages_tokens = 0
 
-        # self.openai_client = openai.OpenAI(
-        #     base_url="http://0.0.0.0:8000/v1",
-        #     api_key="token123",
-        # )
-
         self.cur.execute("""
             INSERT INTO chat_sessions (chat_id, model, tokenizer_model, system_message)
             VALUES (%s, %s, %s, %s)
@@ -441,14 +436,6 @@ class ChatBot:
         if self_response != "":
             parsed_resp['response']['type'] = "SELF_RESPONSE"
             parsed_resp['response']['response'] = self_response
-            return parsed_resp 
-        
-        plan = []
-        for element in root.findall(".//plan"):
-            thoughts.append(element.text)
-        if plan != []:
-            parsed_resp['response']['type'] = "PLAN"
-            parsed_resp['response']['response'] = plan
             return parsed_resp 
         
         tool_calls = self._extract_function_calls(response_text)
