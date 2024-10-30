@@ -16,11 +16,13 @@ import re
 from openai.types.chat.chat_completion import ChatCompletion
 from uuid import uuid4
 import requests
+from outlines import models, generate
+from outlines.models.openai import OpenAIConfig
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.tools.python_sandbox import PythonSandbox
 from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
-from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT
+from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, RESPONSE_CFG_GRAMMAR
 
 
 # Configure logfire
@@ -42,7 +44,7 @@ logger.add(
 )
 
 class ChatBot:
-    def __init__(self, model, chat_id=None, tokenizer_model="", system="", db_config=None):
+    def __init__(self, model, user_id, chat_id, tokenizer_model="", system="", db_config=None):
 
         self.max_message_tokens = 32768
         self.max_reply_msg_tokens = 4096
@@ -50,15 +52,15 @@ class ChatBot:
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url="http://100.84.227.115:8000/v1",
             api_key=OPENROUTER_API_KEY,
         )
-        self.open_router_extra_body = {"provider": {
-                "order": [
-                    "Together"
-                ]
-            }
-        }
+        # self.open_router_extra_body = {"provider": {
+        #         "order": [
+        #             "Together"
+        #         ]
+        #     }
+        # }
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
@@ -69,38 +71,30 @@ class ChatBot:
             }
         
         global logger
-        if chat_id is None:
-            self.chat_id = str(uuid4())
-            logger.bind(chat_id=self.chat_id)
-            
-            # Database connection
-            self.initialize_db(**db_config)
-            self.conn = psycopg2.connect(**db_config)
-            self.cur = self.conn.cursor()
-            
+        self.user_id = user_id
+        self.chat_id = chat_id
+        logger.bind(chat_id=self.chat_id)
+
+        # Database connection
+        self.initialize_db(**db_config)
+        self.conn = psycopg2.connect(**db_config)
+        self.cur = self.conn.cursor()
+
+        # Load chat session metadata
+        self.cur.execute("""
+            SELECT model, tokenizer_model, system_message, user_id
+            FROM chat_sessions 
+            WHERE chat_id = %s
+        """, (chat_id,))
+        session_data = self.cur.fetchone()
+        if not session_data:
+            logger.debug({"event": "chat_id not found", "chat_id": chat_id})
+            logger.info({"event": "chat_id not found", "message": "chat_id: {chat_id} not found. Creating new one under the provided chat_id: {chat_id}"})
             self._create_session(model, self.chat_id, tokenizer_model, system, db_config)
         else:
-            self.chat_id = chat_id
-            logger.bind(chat_id=self.chat_id)
+            self._load_session(self.chat_id, session_data)
 
-            # Database connection
-            self.initialize_db(**db_config)
-            self.conn = psycopg2.connect(**db_config)
-            self.cur = self.conn.cursor()
-
-            # Load chat session metadata
-            self.cur.execute("""
-                SELECT model, tokenizer_model, system_message 
-                FROM chat_sessions 
-                WHERE chat_id = %s
-            """, (chat_id,))
-            session_data = self.cur.fetchone()
-            if not session_data:
-                logger.debug({"event": "chat_id not found", "chat_id": chat_id})
-                logger.info({"event": "chat_id not found", "message": "chat_id: {chat_id} not found. Creating new one under the provided chat_id: {chat_id}"})
-                self._create_session(model, self.chat_id, tokenizer_model, system, db_config)
-            else:
-                self._load_session(self.chat_id, session_data)
+        self.outlines_client = models.openai(self.openai_client, OpenAIConfig("self.model"))
 
     def __call__(self, message):
         logger.info({"event": "Received_user_message", "message": message})
@@ -185,6 +179,7 @@ class ChatBot:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 chat_id UUID PRIMARY KEY,
+                user_id UUID NOT NULL,
                 model VARCHAR(255) NOT NULL,
                 tokenizer_model VARCHAR(255),
                 system_message TEXT,
@@ -282,7 +277,7 @@ class ChatBot:
 
         logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
 
-    def _create_session(self, model, chat_id, tokenizer_model, system, db_config):
+    def _create_session(self, model, chat_id, user_id, tokenizer_model, system, db_config):
         self.chat_id = chat_id
         self.system = {"role": "system", "content": system}
         self.model = model
@@ -295,9 +290,9 @@ class ChatBot:
         self.total_messages_tokens = 0
 
         self.cur.execute("""
-            INSERT INTO chat_sessions (chat_id, model, tokenizer_model, system_message)
-            VALUES (%s, %s, %s, %s)
-        """, (self.chat_id, self.model, self.tokenizer_model, self.system["content"]))
+            INSERT INTO chat_sessions (chat_id, user_id, model, tokenizer_model, system_message)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (self.chat_id, self.user_id, self.model, self.tokenizer_model, self.system["content"]))
         self.conn.commit()
         
         # Add initial system message
@@ -509,99 +504,6 @@ class ChatBot:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
             return f'{{"name": "{function_name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
-    def _get_chat_notes(self, message_id: str):
-
-        self.cur.execute("""
-                    SELECT notes FROM public.chat_notes
-                    WHERE chat_id=%s
-                    ORDER BY id DESC LIMIT 1
-                """, (self.chat_id,))
-        previous_notes = self.cur.fetchone()
-        previous_notes = previous_notes[0] if previous_notes is not None else ""
-
-        chat_transcript = ""
-        for turn in self.messages:
-            if turn.get('type', '') == "function_call":
-                pass
-                # print(f"{turn['type']}: {turn['name']}: {turn['parameters']}: {turn['response']}")
-            else:
-                if turn['role'].lower() != "system":
-                    chat_transcript += f"{turn['role'].upper()}:\n{turn['content']}\n"
-        messages = [
-            {"role": "system", "content": CHAT_NOTES_PROMPT},
-            {"role": "user", "content": f"extract information from the following conversation:\n<previous_notes>{previous_notes}</previous_notes>\n\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
-        ]
-        completion = self.get_llm_response(messages, model_name=self.model)
-
-        logger.debug({"event": "parsing_chat_notes_llm_response", "response_text": completion})
-        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
-        xml_root_element = f"<root>{response_text}</root>"
-        
-        try:
-            root = ET.fromstring(xml_root_element)
-        except ET.ParseError as e:
-            logger.error({"event": "failed_chat_summary_parsing", "error": e})
-            raise(e)
-
-        parsed_resp = {
-            "notes": ""
-        }
-        
-        notes = []
-        for element in root.find(".//important_notes"):
-            if element.tag == "note":
-                notes.append(element.text)
-        parsed_resp['notes'] = (previous_notes + "\n" + "\n".join(notes).strip()).strip()
-
-        notes_id = self.cur.execute("""
-            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
-        self.conn.commit()
-
-    def _get_session_notes(self, message_id: str):
-        self.cur.execute("""
-                    SELECT notes FROM public.chat_notes
-                    WHERE chat_id=%s
-                    ORDER BY id DESC LIMIT 1
-                """, (self.chat_id,))
-        latest_session_notes = self.cur.fetchone()
-        latest_session_notes = latest_session_notes[0] if latest_session_notes is not None else ""
-
-        messages = [
-            {"role": "system", "content": CHAT_SESSION_NOTES_PROMPT},
-            {"role": "user", "content": f"<chat_session_notes>{latest_session_notes}</chat_session_notes>"}
-        ]
-        completion = self.get_llm_response(messages, model_name=self.model)
-
-        logger.debug({"event": "parsing_session_end_notes_llm_response", "response_text": completion})
-        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
-        xml_root_element = f"<root>{response_text}</root>"
-        
-        try:
-            root = ET.fromstring(xml_root_element)
-        except ET.ParseError as e:
-            logger.error({"event": "failed_session_final_notes_parsing", "error": e})
-            raise(e)
-
-        parsed_resp = {
-            "notes": ""
-        }
-        
-        notes = []
-        for element in root.find(".//important_notes"):
-            if element.tag == "note":
-                notes.append(element.text)
-        parsed_resp['notes'] = (latest_session_notes + "\n" + "\n".join(notes).strip()).strip()
-
-        notes_id = self.cur.execute("""
-            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
-        self.conn.commit()
-
     def __del__(self):
         self._get_session_notes(f"{self.chat_id}_final_session_notes")
         # Close database connection when the object is destroyed
@@ -619,7 +521,7 @@ class ChatBot:
         messages = [self.system]
         messages.extend(self.messages)
         logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
-        completion = self.get_llm_response(messages=messages, model_name=self.model)
+        completion = self.get_llm_response_cfg(messages=messages, model_name=self.model)
         logger.debug({"event": "LLM_response", "response": completion.model_dump()})
         logger.info({"event": "Token_usage", "usage": completion.usage.model_dump()})
         return completion
@@ -664,6 +566,27 @@ class ChatBot:
                 max_tokens=self.max_reply_msg_tokens,
                 temperature=0.4,
                 extra_body= extra_body
+            )
+        except Exception as e:
+            if e['code'] == 'model_not_available':
+                pass
+            else:
+                raise
+        logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
+        return chat_completion
+    
+    def get_llm_response_cfg(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
+        logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
+        if "openrouter" in self.openai_client.base_url.host:
+            extra_body = extra_body if extra_body is not None else self.open_router_extra_body
+        
+        try:
+            chat_completion = self.openai_client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                max_tokens=self.max_reply_msg_tokens,
+                temperature=0.4,
+                extra_body= {"guided_grammar": RESPONSE_CFG_GRAMMAR}
             )
         except Exception as e:
             if e['code'] == 'model_not_available':

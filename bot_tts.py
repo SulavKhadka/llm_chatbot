@@ -3,45 +3,14 @@ import sounddevice as sd
 import numpy as np
 from scipy import signal
 import time
-
+import requests
 from uuid import uuid4
-from secret_keys import POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2
-from llm_chatbot import chatbot, utils, function_tools
 import xml.etree.ElementTree as ET
-
-# Initialize the ChatBot
-tools_prompt = TOOLS_PROMPT_SNIPPET.format(
-    TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.get_tools())
-)
-chatbot_system_msg = SYS_PROMPT.format(
-    TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW_2
-)
-db_config = {
-    "dbname": "chatbot_db",
-    "user": "chatbot_user",
-    "password": POSTGRES_DB_PASSWORD,
-    "host": "localhost",
-    "port": "5432",
-}
-
-
-llm_bot = chatbot.ChatBot(
-    model="qwen/qwen-2.5-72b-instruct",
-    tokenizer_model="Qwen/Qwen2.5-72B-Instruct",
-    system=chatbot_system_msg,
-    db_config=db_config,
-)
 
 
 def get_bot_response(user_message: str):
-    response = llm_bot(user_message)
-    response = utils.sanitize_inner_content(response)
-    root = ET.fromstring(f"<root>{response}</root>")
-
-    # Extract text from <response_to_user> tag
-    response_to_user = root.find(".//response_to_user")
-    return response_to_user.text
+    response = requests.post("http://0.0.0.0:8000/sulav_test/message")
+    return response
 
 
 class SpeechSegmenter:
@@ -72,6 +41,7 @@ class SpeechSegmenter:
 
         # Setup audio stream
         self.chunk_size = int(sample_rate * chunk_duration)
+        print(sd.query_devices())
         self.stream = sd.InputStream(
             samplerate=sample_rate,
             channels=1,

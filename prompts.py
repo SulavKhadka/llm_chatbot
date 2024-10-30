@@ -1,3 +1,46 @@
+RESPONSE_CFG_GRAMMAR = """// Assistant Response Grammar for Lark
+
+start: assistant_response
+
+assistant_response: thought_block (tool_call_block | internal_response_block | user_response_block)
+
+// Thought component
+thought_block: THOUGHT_START CONTENT THOUGHT_END
+
+// Tool call component
+tool_call_block: TOOL_CALL_START json TOOL_CALL_END
+json: "[" dict "]"
+dict: "{" pair ("," pair)* "}"
+pair: STRING ":" value
+array: "[" (value ("," value)*)? "]"
+value: dict | array | STRING | NUMBER | BOOLEAN | "null"
+
+// Internal response component
+internal_response_block: INTERNAL_START CONTENT INTERNAL_END
+
+// User response component
+user_response_block: USER_START CONTENT USER_END
+
+// XML Tags
+THOUGHT_START: "<thought>"
+THOUGHT_END: "</thought>"
+TOOL_CALL_START: "<tool_call>"
+TOOL_CALL_END: "</tool_call>"
+INTERNAL_START: "<internal_response>"
+INTERNAL_END: "</internal_response>"
+USER_START: "<response_to_user>"
+USER_END: "</response_to_user>"
+
+// Basic content and values
+CONTENT: /[^<>]+/
+STRING: /\"[^\"]*\"/
+NUMBER: /-?\d+(\.\d+)?([eE][+-]?\d+)?/
+BOOLEAN: "true" | "false"
+
+// Ignore whitespace
+%import common.WS
+%ignore WS"""
+
 CHAT_NOTES_PROMPT = '''
 You are an AI assistant tasked with analyzing chat transcripts. Your primary function is to record important notes for future reference. You are provided with the notes so far within the tags <previous_notes></previous_notes>. You should take that info and add or edit them with the information in the updated transcript. A lot of times no addition or edits are needed as nothing of significance changes. Think of the notes you are taking like a office secretary or butler wanting to note down the preferences, habits, skills, things to do, and various other things about the lives of the people they are serving so as to understand them and talk to them better.
 
