@@ -158,40 +158,6 @@ class SpotifyTool:
         except Exception as e:
             return None
 
-    # Apply the _ensure_spotify_connected decorator to all methods that need it
-    @_ensure_spotify_connected
-    def get_devices(self) -> str:
-        """Get list of available Spotify devices."""
-        try:
-            devices = self.sp.devices()
-            if not devices['devices']:
-                return json.dumps({
-                    "status": "error",
-                    "message": "No Spotify devices found. Please open Spotify on a device."
-                })
-            
-            formatted_devices = []
-            for device in devices['devices']:
-                formatted_devices.append({
-                    "id": device['id'],
-                    "name": device['name'],
-                    "type": device['type'],
-                    "is_active": device['is_active'],
-                    "volume": device.get('volume_percent', 0),
-                    "is_restricted": device.get('is_restricted', False)
-                })
-            
-            return json.dumps({
-                "status": "success",
-                "devices": formatted_devices
-            })
-                
-        except Exception as e:
-            return json.dumps({
-                "status": "error",
-                "message": str(e)
-            })
-
     def clear_auth_cache(self):
         """Clear the stored authentication cache."""
         try:
@@ -208,6 +174,8 @@ class SpotifyTool:
     def play_pause(self):
         """Toggle current playback between play and pause states.
         
+        Args: None
+
         Returns:
             JSON string containing:
             - Action taken (paused/resumed)
@@ -247,6 +215,8 @@ class SpotifyTool:
     def next_track(self) -> str:
         """Skip to next track in queue.
         
+        Args: None
+
         Returns:
             JSON string containing:
             - Success confirmation
@@ -275,6 +245,8 @@ class SpotifyTool:
     @_require_active_device
     def previous_track(self) -> str:
         """Return to previous track.
+        
+        Args: None
         
         Returns:
             JSON string containing:
@@ -327,6 +299,7 @@ class SpotifyTool:
                 "message": str(e)
             })
 
+    @_require_active_device
     @_ensure_spotify_connected
     def search_and_play(self, query: str, type: str = "track") -> str:
         """Search for and play specified content.
@@ -375,11 +348,13 @@ class SpotifyTool:
                 "status": "error",
                 "message": str(e)
             })
-
+    
     @_ensure_spotify_connected
     def get_current_playback(self) -> str:
         """Get information about currently playing content.
         
+        Args: None
+
         Returns:
             JSON string containing:
             - Current track/playback information
@@ -409,6 +384,8 @@ class SpotifyTool:
     def get_devices(self) -> str:
         """Retrieve list of available Spotify devices.
         
+        Args: None
+
         Returns:
             JSON string containing:
             - List of devices with ID, name, type, active status, volume
