@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from llm_chatbot.chatbot import ChatBot
 from llm_chatbot import utils, function_tools
 from uuid import uuid4
+import xml.etree.ElementTree as ET
 from secret_keys import POSTGRES_DB_PASSWORD
 from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2
 
@@ -35,8 +36,8 @@ active_sessions: dict[str, ChatBot] = {}
 def get_session(user_id: str, model="Qwen/Qwen2.5-72B-Instruct"):
     if user_id not in active_sessions:
         active_sessions[user_id] = ChatBot(
-            model = model,
-            tokenizer_model= model,
+            model = "Qwen/Qwen2.5-72B-Instruct-Turbo",
+            tokenizer_model= "Qwen/Qwen2.5-72B-Instruct",
             user_id = user_id,
             chat_id = str(uuid4()),
             system=chatbot_system_msg,
@@ -47,6 +48,12 @@ def get_session(user_id: str, model="Qwen/Qwen2.5-72B-Instruct"):
 @app.post("/{user_id}/message")
 def process_message(user_id: str, client_request: ClientRequest):
     chatbot = get_session(user_id)
-    response = chatbot(client_request)
+    print(client_request.message)
+    response = chatbot(client_request.message)
     print(response)
-    return response
+    response = utils.sanitize_inner_content(response)
+    root = ET.fromstring(f"<root>{response}</root>")
+
+    # Extract text from <response_to_user> tag
+    response_to_user = root.find(".//response_to_user")
+    return response_to_user.text

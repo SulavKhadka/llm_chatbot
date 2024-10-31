@@ -6,12 +6,26 @@ import time
 import requests
 from uuid import uuid4
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 
+@dataclass
+class ClientRequest:
+    user_id: str
+    client_type: str
+    message: str
+    user_metadata: dict
 
 def get_bot_response(user_message: str):
-    response = requests.post("http://0.0.0.0:8000/sulav_test/message")
-    return response
-
+    client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})
+    try:
+        response = requests.post("http://0.0.0.0:8000/sulav_test/message", json=client_request.__dict__, timeout=120)
+        if response.status_code == 200:
+            return response.text
+        return f"error processing bot response, status code: {response.status_code}"
+    except Exception as e:
+        print(e)
+        return f"error processing bot response, error: {e}"
+    
 
 class SpeechSegmenter:
     def __init__(
@@ -36,7 +50,7 @@ class SpeechSegmenter:
         self.chunk_duration = chunk_duration
 
         # Initialize ASR components
-        self.asr = FasterWhisperASR("en", "large-v2")
+        self.asr = FasterWhisperASR("en", "distil-large-v3")
         self.online = OnlineASRProcessor(self.asr)
 
         # Setup audio stream
@@ -151,10 +165,10 @@ if __name__ == "__main__":
     from RealtimeTTS import TextToAudioStream, CoquiEngine
 
     tts_engine = CoquiEngine(
-        model_name="tts_models/multilingual/multi-dataset/bark",
+        model_name="tts_models/multilingual/multi-dataset/xtts_v2",
         full_sentences=True,
         speed=1.2,
-        stream_chunk_size=40,
+        stream_chunk_size=80,
         overlap_wav_len=2048,
         thread_count=12,
         sentence_silence_duration=0.4,

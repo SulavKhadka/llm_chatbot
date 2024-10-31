@@ -52,15 +52,15 @@ class ChatBot:
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
-            base_url="http://100.84.227.115:8000/v1",
-            api_key=OPENROUTER_API_KEY,
+            base_url="https://api.together.xyz/v1",
+            api_key=TOGETHER_AI_TOKEN,
         )
-        # self.open_router_extra_body = {"provider": {
-        #         "order": [
-        #             "Together"
-        #         ]
-        #     }
-        # }
+        self.open_router_extra_body = {"provider": {
+                "order": [
+                    "Together"
+                ]
+            }
+        }
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
@@ -90,7 +90,7 @@ class ChatBot:
         if not session_data:
             logger.debug({"event": "chat_id not found", "chat_id": chat_id})
             logger.info({"event": "chat_id not found", "message": "chat_id: {chat_id} not found. Creating new one under the provided chat_id: {chat_id}"})
-            self._create_session(model, self.chat_id, tokenizer_model, system, db_config)
+            self._create_session(model, self.chat_id, tokenizer_model, system)
         else:
             self._load_session(self.chat_id, session_data)
 
@@ -112,7 +112,7 @@ class ChatBot:
                 parsed_response = self._parse_results(completion)
             
             recursion_counter += 1
-            llm_thought = f"<thought>\n{parsed_response['thought']}\n</thought>"
+            llm_thought = f"<thought>{parsed_response['thought']}</thought>"
 
             if parsed_response['response']['type'] == "TOOL_CALL":
                 tool_calls = parsed_response['response']['response']
@@ -128,14 +128,14 @@ class ChatBot:
                     continue
                 else:
                     self_recurse = False
-                    response = f"{llm_thought}\n<internal_response>\nno tool calls found, continuing on\n</internal_response>"
+                    response = f"{llm_thought}\n<internal_response>no tool calls found, continuing on</internal_response>"
             
             if parsed_response['response']['type'] == "USER_RESPONSE":
                 self_recurse = False
-                response = f"{llm_thought}\n<response_to_user>\n{parsed_response['response']['response']}\n</response_to_user>"
+                response = f"{llm_thought}\n<response_to_user>{parsed_response['response']['response']}</response_to_user>"
 
             if parsed_response['response']['type'] == "SELF_RESPONSE":
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>\n{parsed_response['response']['response']}\n</internal_response>"})
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"})
                 continue
 
         logger.info({"event": "Assistant_response", "response": response})
@@ -277,7 +277,7 @@ class ChatBot:
 
         logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
 
-    def _create_session(self, model, chat_id, user_id, tokenizer_model, system, db_config):
+    def _create_session(self, model, chat_id, tokenizer_model, system):
         self.chat_id = chat_id
         self.system = {"role": "system", "content": system}
         self.model = model
@@ -396,8 +396,8 @@ class ChatBot:
 
     def _parse_results(self, response_text: str):
         logger.debug({"event": "Parsing_llm_response", "response_text": response_text})
-        response_text = utils.sanitize_inner_content(response_text)
-        xml_root_element = f"""<root>{response_text}</root>"""
+        sanitized_response_text = utils.sanitize_inner_content(response_text)
+        xml_root_element = f"""<root>{sanitized_response_text}</root>"""
         
         try:
             root = ET.fromstring(xml_root_element)
@@ -414,12 +414,12 @@ class ChatBot:
 
         thoughts = []
         for element in root.findall(".//thought"):
-            thoughts.append(element.text)
+            thoughts.append(utils.unsanitize_content(element.text))
         parsed_resp['thought'] = "\n".join(thoughts).strip()
 
         user_response = ""
         for element in root.findall(".//response_to_user"):
-            user_response += element.text
+            user_response += utils.unsanitize_content(element.text)
         if user_response != "":
             parsed_resp['response']['type'] = "USER_RESPONSE"
             parsed_resp['response']['response'] = user_response.strip()
@@ -427,13 +427,13 @@ class ChatBot:
 
         self_response = ""
         for element in root.findall(".//internal_response"):
-            self_response += element.text
+            self_response += utils.unsanitize_content(element.text)
         if self_response != "":
             parsed_resp['response']['type'] = "SELF_RESPONSE"
             parsed_resp['response']['response'] = self_response
             return parsed_resp 
         
-        tool_calls = self._extract_function_calls(response_text)
+        tool_calls = self._extract_function_calls(root)
         if tool_calls != []:
             parsed_resp['response']['type'] = "TOOL_CALL"
             parsed_resp['response']['response'] = tool_calls
@@ -443,17 +443,11 @@ class ChatBot:
         parsed_resp['response']['response'] = response_text
         return parsed_resp 
 
-    def _extract_function_calls(self, response):
-        logger.debug({"event": "Extracting_function_calls", "response": response})
-        if '<tool_call>' not in response:
-            logger.debug({"event": "No_tool_calls_found"})
-            return []
-
-        xml_root_element = f"<root>{response}</root>"
-        root = ET.fromstring(xml_root_element)
+    def _extract_function_calls(self, xml_response):
+        logger.debug({"event": "Extracting_function_calls", "response": xml_response})
 
         tool_calls = []
-        for element in root.findall(".//tool_call"):
+        for element in xml_response.findall(".//tool_call"):
             json_data = None
             try:
                 json_text = element.text.strip()
@@ -504,6 +498,99 @@ class ChatBot:
             logger.warning({"event": "Invalid_function_name", "name": function_name})
             return f'{{"name": "{function_name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
+    def _get_chat_notes(self, message_id: str):
+
+        self.cur.execute("""
+                    SELECT notes FROM public.chat_notes
+                    WHERE chat_id=%s
+                    ORDER BY id DESC LIMIT 1
+                """, (self.chat_id,))
+        previous_notes = self.cur.fetchone()
+        previous_notes = previous_notes[0] if previous_notes is not None else ""
+
+        chat_transcript = ""
+        for turn in self.messages:
+            if turn.get('type', '') == "function_call":
+                pass
+                # print(f"{turn['type']}: {turn['name']}: {turn['parameters']}: {turn['response']}")
+            else:
+                if turn['role'].lower() != "system":
+                    chat_transcript += f"{turn['role'].upper()}:\n{turn['content']}\n"
+        messages = [
+            {"role": "system", "content": CHAT_NOTES_PROMPT},
+            {"role": "user", "content": f"extract information from the following conversation:\n<previous_notes>{previous_notes}</previous_notes>\n\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
+        ]
+        completion = self.get_llm_response(messages, model_name=self.model)
+
+        logger.debug({"event": "parsing_chat_notes_llm_response", "response_text": completion})
+        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
+        xml_root_element = f"<root>{response_text}</root>"
+        
+        try:
+            root = ET.fromstring(xml_root_element)
+        except ET.ParseError as e:
+            logger.error({"event": "failed_chat_summary_parsing", "error": e})
+            raise(e)
+
+        parsed_resp = {
+            "notes": ""
+        }
+        
+        notes = []
+        for element in root.find(".//important_notes"):
+            if element.tag == "note":
+                notes.append(element.text)
+        parsed_resp['notes'] = (previous_notes + "\n" + "\n".join(notes).strip()).strip()
+
+        notes_id = self.cur.execute("""
+            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+        self.conn.commit()
+
+    def _get_session_notes(self, message_id: str):
+        self.cur.execute("""
+                    SELECT notes FROM public.chat_notes
+                    WHERE chat_id=%s
+                    ORDER BY id DESC LIMIT 1
+                """, (self.chat_id,))
+        latest_session_notes = self.cur.fetchone()
+        latest_session_notes = latest_session_notes[0] if latest_session_notes is not None else ""
+
+        messages = [
+            {"role": "system", "content": CHAT_SESSION_NOTES_PROMPT},
+            {"role": "user", "content": f"<chat_session_notes>{latest_session_notes}</chat_session_notes>"}
+        ]
+        completion = self.get_llm_response(messages, model_name=self.model)
+
+        logger.debug({"event": "parsing_session_end_notes_llm_response", "response_text": completion})
+        response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
+        xml_root_element = f"<root>{response_text}</root>"
+        
+        try:
+            root = ET.fromstring(xml_root_element)
+        except ET.ParseError as e:
+            logger.error({"event": "failed_session_final_notes_parsing", "error": e})
+            raise(e)
+
+        parsed_resp = {
+            "notes": ""
+        }
+        
+        notes = []
+        for element in root.find(".//important_notes"):
+            if element.tag == "note":
+                notes.append(element.text)
+        parsed_resp['notes'] = (latest_session_notes + "\n" + "\n".join(notes).strip()).strip()
+
+        notes_id = self.cur.execute("""
+            INSERT INTO chat_notes (message_id, chat_id, notes, chat_summary, metadata)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
+        self.conn.commit()
+
     def __del__(self):
         self._get_session_notes(f"{self.chat_id}_final_session_notes")
         # Close database connection when the object is destroyed
@@ -521,7 +608,7 @@ class ChatBot:
         messages = [self.system]
         messages.extend(self.messages)
         logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
-        completion = self.get_llm_response_cfg(messages=messages, model_name=self.model)
+        completion = self.get_llm_response(messages=messages, model_name=self.model)
         logger.debug({"event": "LLM_response", "response": completion.model_dump()})
         logger.info({"event": "Token_usage", "usage": completion.usage.model_dump()})
         return completion
