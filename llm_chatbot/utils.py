@@ -1,5 +1,6 @@
 from typing import List, Union
-from secret_keys import TOGETHER_AI_TOKEN
+from prompts import RESPONSE_CFG_GRAMMAR
+from secret_keys import TOGETHER_AI_TOKEN, OPENROUTER_API_KEY
 import openai
 import xml.etree.ElementTree as ET
 import re
@@ -25,13 +26,13 @@ def sanitize_inner_content(llm_output):
 
     # Escape content inside <tool_call> and <response_to_user>
     llm_output = re.sub(r'<(tool_call_response|tool_call|response_to_user|self_response|thought)>(.*?)</\1>', escape_content, llm_output, flags=re.DOTALL)
-
+    llm_output = llm_output.replace(">\n", ">").replace("\n<", "<").strip()
     return llm_output
 
-def ensure_llm_response_format(llm_response_text):
+def ensure_llm_response_format(llm_response_text, tools=None):
     openai_client = openai.OpenAI(
-            api_key=TOGETHER_AI_TOKEN,
-            base_url="https://api.together.xyz/v1"
+            api_key=OPENROUTER_API_KEY,
+            base_url="https://openrouter.ai/api/v1"
         )
     
     messages = [
@@ -47,8 +48,8 @@ def ensure_llm_response_format(llm_response_text):
 3. After the thought tag, there must be exactly one of the following response types:
    - <tool_call></tool_call>
      - Used when the assistant needs to access external data or functions.
-     - Must contain a JSON object with "name" and "parameters" keys.
-     - Only tools specified in the original <tools></tools> section should be used.
+     - Must contain a list of JSON objects with "name" and "parameters" keys.
+     - Only functions specified in the original <tools></tools> section should be used.
    - <self_response></self_response>
      - Used when the assistant needs another cycle to process something, typically when executing a plan step-by-step.
      - This is an internal message and will not be visible to the user.
@@ -58,7 +59,7 @@ def ensure_llm_response_format(llm_response_text):
 4. Ensure all XML tags are properly opened and closed.
 5. Check that the XML is well-formed and can be parsed.
 6. Verify that only the tools specified in the original <tools></tools> section are used in <tool_call> tags.
-7. For <tool_call> tags, ensure the content is a valid JSON object with "name" and "parameters" keys.
+7. For <tool_call> tags, ensure the content is a valid list of JSON objects with "name" and "parameters" keys.
 
 If the response follows these guidelines and has valid, parseable XML, reply only with "no correction needed" and no other text before or after.
 
@@ -76,13 +77,13 @@ Input:
 <llm_response_content>
 <thought>The user has asked about the weather in New York. I need to use the weather API to get this information.</thought>
 <tool_call>
-{"name": "get_current_weather", "parameters": {"location": "New York, NY", "unit": "Fahrenheit"}}
+[{"name": "get_current_weather", "parameters": {"location": "New York, NY", "unit": "Fahrenheit"}}]
 </tool_call>
 </llm_response_content>
 
 Output: no correction needed
 
-2. Multiple response types (keep most appropriate):
+2. Multiple response types (can only have one, keep most appropriate):
 Input:
 <llm_response_content>
 <thought>The user asked about quantum computing. I'll provide a brief explanation.</thought>
@@ -103,12 +104,7 @@ Input:
 I'll use the `run_python_code` tool to execute the provided Python code.
 </thought>
 <tool_call>
-{
-    "name": "run_python_code",
-    "parameters": {
-        "code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"
-    }
-}
+[{"name": "run_python_code","parameters": {"code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"}}]
 </llm_response_content>
 
 Output:
@@ -117,12 +113,7 @@ Output:
 I'll use the `run_python_code` tool to execute the provided Python code.
 </thought>
 <tool_call>
-{
-    "name": "run_python_code",
-    "parameters": {
-        "code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"
-    }
-}
+[{"name": "run_python_code","parameters": {"code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"}}]
 </tool_call>
 </corrected_response>
 
@@ -132,7 +123,7 @@ Input:
 <thought>The user wants to know about famous landmarks in Paris.</thought>
 <response_to_user>Here are some famous landmarks in Paris:
 <tool_call>
-{"name": "get_landmarks", "parameters": {"city": "Paris"}}
+[{"name": "get_landmarks", "parameters": {"city": "Paris"}}]
 </tool_call>
 </response_to_user>
 </llm_response_content>
@@ -141,7 +132,7 @@ Output:
 <corrected_response>
 <thought>The user wants to know about famous landmarks in Paris.</thought>
 <tool_call>
-{"name": "get_landmarks", "parameters": {"city": "Paris"}}
+[{"name": "get_landmarks", "parameters": {"city": "Paris"}}]
 </tool_call>
 </corrected_response>
 
@@ -150,7 +141,7 @@ Input:
 <llm_response_content>
 <thought>The user asked for a recipe. I'll use the recipe finder tool.</thought>
 <tool_call>
-{"name": "find_recipe", "parameters": {"dish": "spaghetti carbonara"}}
+[{"name": "find_recipe", "parameters": {"dish": "spaghetti carbonara"}}]
 </tool_call>
 </llm_response_content>
 
@@ -172,8 +163,12 @@ Output:
 <thought>The user greeted me. I should respond politely.</thought>
 <response_to_user>Hello! Hi there! How can I assist you today?</response_to_user>
 </corrected_response>
+""" + f"""\nFor the input you are about to recieve here is the list of tools available to the agent that generated the llm_response_text.
+<tools>
+{tools}
+</tools>
 
-Remember, your role is to ensure proper XML structure and tag usage, not to modify or judge the content of the responses. Don't correct when there is none needed, trust your evaluation! Always strive to maintain the original intent and wording of the assistant's response while correcting only the XML structure."""
+Remember, your task is to ensure every payload has proper XML structure and tag usage, correcting structure as needed while always perfectly copying the content of the responses. No action needed when XML is valid, evaluate carefully using the examples given above as a guide. Always keep the original content, intent, and wording of the assistant's response while correcting only the XML structure."""
         },
         {
             "role": "user",
@@ -182,15 +177,16 @@ Remember, your role is to ensure proper XML structure and tag usage, not to modi
     ]
 
     chat_completion = openai_client.chat.completions.create(
-        model="Qwen/Qwen2.5-72B-Instruct-Turbo",
+        model="meta-llama/llama-3.1-70b-instruct",
         messages=messages,
         max_tokens=4096,
-        temperature=0.4,
-        top_logprobs=20
+        temperature=0.1,
+        top_logprobs=20,
+        logprobs=True,
     )
 
-    llm_output = sanitize_inner_content(chat_completion.choices[0].message.content)
-    xml_root_element = f"""<root>{llm_output}</root>"""
+    sanitized_llm_output = sanitize_inner_content(chat_completion.choices[0].message.content)
+    xml_root_element = f"""<root>{sanitized_llm_output}</root>"""
     try:
         root = ET.fromstring(xml_root_element)
     except ET.ParseError as e:

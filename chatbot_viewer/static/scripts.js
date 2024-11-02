@@ -1,0 +1,325 @@
+let activeChat = null;
+
+function formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+    });
+}
+
+async function loadChats() {
+    const response = await fetch('/chats/' + currentUserId);
+    const chats = await response.json();
+    console.log("scripts.js, ln 22: " + chats)
+    const chatList = document.getElementById('chat-list');
+    chatList.innerHTML = '';
+
+    chats.forEach(chat => {
+        const chatItem = document.createElement('div');
+        chatItem.className = 'chat-item';
+        chatItem.innerHTML = `
+            <div class="chat-item-header">
+                <span class="chat-id">${chat.chat_id.slice(0, 8)}</span>
+                <span class="message-count">${chat.message_count}</span>
+            </div>
+            <div class="chat-meta">
+                <div>${chat.model.split('/').pop()}</div>
+                <div>Last active: ${formatDate(chat.latest_message_time)}</div>
+            </div>
+        `;
+        
+        chatItem.onclick = () => loadChat(chat);
+        chatList.appendChild(chatItem);
+    });
+}
+
+function tryParseJSON(str) {
+    try {
+        const parsed = JSON.parse(str);
+        return JSON.stringify(parsed, null, 2);
+    } catch (e) {
+        return str;
+    }
+}
+
+function formatMessageContent(content) {
+    // Handle thought tags
+    content = content.replace(/<thought>([\s\S]*?)<\/thought>/g, (match, thought) => {
+        return `
+            <div class="message-content thought-block">
+                <div class="tag-label">thought</div>
+                ${thought.trim()}
+            </div>`;
+    });
+    
+    // Handle code blocks
+    content = content.replace(/```([\s\S]*?)```/g, (match, code) => {
+        return `<pre><code>${code}</code></pre>`;
+    });
+    
+    // Handle tool calls
+    content = content.replace(/<tool_call>([\s\S]*?)<\/tool_call>/g, (match, toolCall) => {
+        const formattedJson = tryParseJSON(toolCall.trim());
+        return `
+            <div class="message-content function-call">
+                <div class="tag-label">tool call</div>
+                <div class="json-content">${formattedJson}</div>
+            </div>`;
+    });
+    
+    // Handle tool call responses
+    content = content.replace(/<tool_call_response>([\s\S]*?)<\/tool_call_response>/g, (match, response) => {
+        const formattedJson = tryParseJSON(response.trim());
+        return `
+            <div class="message-content tool-response">
+                <div class="tag-label">tool response</div>
+                <div class="json-content">${formattedJson}</div>
+            </div>`;
+    });
+    
+    return content;
+}
+
+async function loadChat(chat) {
+    activeChat = chat;
+    
+    const chatHeader = document.getElementById('chat-header');
+    chatHeader.innerHTML = `
+        <h2>Chat ${chat.chat_id}</h2>
+        <div class="chat-header-meta">
+            <div>Model: ${chat.model.split('/').pop()}</div>
+            <div>Started: ${formatDate(chat.started_at)}</div>
+            <div>Messages: ${chat.message_count}</div>
+        </div>
+    `;
+
+    // Highlight active chat in list
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+        if(item.textContent.includes(chat.chat_id.slice(0, 8))) {
+            item.classList.add('active');
+        }
+    });
+    
+    // Load messages
+    const response = await fetch(`/chat/${chat.chat_id}/messages`);
+    const messages = await response.json();
+    
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.innerHTML = '';
+    
+    messages.forEach(msg => {
+        if(msg.role === 'system') return;  // Skip system messages
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${msg.role}`;
+        
+        const formattedContent = formatMessageContent(msg.content);
+        
+        messageDiv.innerHTML = `
+            <div class="message-content">${formattedContent}</div>
+            <div class="message-meta">
+                <span class="role-badge">${msg.role}</span>
+                <span>${formatDate(msg.created_at)}</span>
+                ${msg.is_purged ? '<span class="purged-indicator">purged</span>' : ''}
+            </div>
+        `;
+        
+        messagesDiv.appendChild(messageDiv);
+    });
+    
+    // Scroll to bottom
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function addNewChatButton() {
+    const chatList = document.getElementById('chat-list');
+    const button = document.createElement('button');
+    button.className = 'new-chat-button';
+    button.textContent = 'New Chat';
+    button.onclick = startNewChat;
+    chatList.insertBefore(button, chatList.firstChild);
+}
+
+function startNewChat() {
+    // Generate a new user ID if none exists
+    if (!currentUserId) {
+        currentUserId = crypto.randomUUID();
+    }
+    
+    // Reset the chat view
+    const chatHeader = document.getElementById('chat-header');
+    chatHeader.innerHTML = '<h2>New Chat</h2>';
+    
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.innerHTML = '';
+    
+    // Show message input and mark as active chat
+    const messageInput = document.getElementById('message-input');
+    messageInput.style.display = 'block';
+    isActiveChat = true;
+    
+    // Reset active states in chat list
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+    });
+}
+
+async function loadChat(chat) {
+    activeChat = chat;
+    console.log(chat);
+    
+    // Update chat header
+    const chatHeader = document.getElementById('chat-header');
+    chatHeader.innerHTML = `
+        <h2>Chat ${chat.chat_id}</h2>
+        <div class="chat-header-meta">
+            <div>User: ${chat.user_id}</div>
+            <div>Model: ${chat.model.split('/').pop()}</div>
+            <div>Started: ${formatDate(chat.started_at)}</div>
+            <div>Messages: ${chat.message_count}</div>
+        </div>
+    `;
+    
+    // Highlight active chat in list
+    document.querySelectorAll('.chat-item').forEach(item => {
+        item.classList.remove('active');
+        if(item.textContent.includes(chat.chat_id.slice(0, 8))) {
+            item.classList.add('active');
+        }
+    });
+    
+    // Load messages
+    const response = await fetch(`/chat/${chat.chat_id}/messages`);
+    const messages = await response.json();
+    
+    const messagesDiv = document.getElementById('messages');
+    messagesDiv.innerHTML = '';
+    
+    messages.forEach(msg => {
+        if(msg.role === 'system') return;  // Skip system messages
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${msg.role}`;
+        
+        const formattedContent = formatMessageContent(msg.content);
+        
+        messageDiv.innerHTML = `
+            <div class="message-content">${formattedContent}</div>
+            <div class="message-meta">
+                <span class="role-badge">${msg.role}</span>
+                <span>${formatDate(msg.created_at)}</span>
+                ${msg.is_purged ? '<span class="purged-indicator">purged</span>' : ''}
+            </div>
+        `;
+        
+        messagesDiv.appendChild(messageDiv);
+    });
+    
+    // Show/hide message input based on whether this is the latest chat
+    const messageInput = document.getElementById('message-input');
+    isActiveChat = false;
+    
+    // Check if this is the most recent chat
+    const allChats = await fetch('/chats/' + chat.user_id).then(r => r.json());
+    if (allChats.length > 0 && allChats[0].chat_id === chat.chat_id) {
+        messageInput.style.display = 'block';
+        isActiveChat = true;
+    } else {
+        messageInput.style.display = 'none';
+    }
+    
+    // Scroll to bottom
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// Initial load
+loadChats();
+
+let isActiveChat = false;
+
+document.addEventListener('DOMContentLoaded', function() {
+    addNewChatButton();
+    
+    const messageForm = document.getElementById('message-form');
+    const messageText = document.getElementById('message-text');
+    const sendButton = messageForm.querySelector('button[type="submit"]');
+    
+    messageForm.onsubmit = async function(e) {
+        e.preventDefault();
+        if (!messageText.value.trim() || !isActiveChat) return;
+        
+        // Disable input while processing
+        messageText.disabled = true;
+        sendButton.disabled = true;
+        
+        // Add user message to UI
+        const messagesDiv = document.getElementById('messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message user';
+        messageDiv.innerHTML = `
+            <div class="message-content">${messageText.value}</div>
+            <div class="message-meta">
+                <span class="role-badge">user</span>
+                <span>${formatDate(new Date())}</span>
+            </div>
+        `;
+        messagesDiv.appendChild(messageDiv);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        
+        try {
+            // Send message to backend
+            const response = await fetch(`/api/${currentUserId}/${activeChat.chat_id}/message`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    user_id: currentUserId,
+                    client_type: "web",
+                    message: messageText.value,
+                    user_metadata: {}
+                })
+            });
+            if (response.status != 200){
+                throw("Not a 200 response. ewwwww");
+            }
+            const responseText = await response.text();
+            
+            // Add assistant response to UI
+            const responseDiv = document.createElement('div');
+            responseDiv.className = 'message assistant';
+            responseDiv.innerHTML = `
+                <div class="message-content">${responseText}</div>
+                <div class="message-meta">
+                    <span class="role-badge">assistant</span>
+                    <span>${formatDate(new Date())}</span>
+                </div>
+            `;
+            messagesDiv.appendChild(responseDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            // Clear input
+            messageText.value = '';
+            
+        } catch (error) {
+            console.error('Error sending message:', error);
+            alert('Error sending message. Please try again.');
+        } finally {
+            // Re-enable input
+            messageText.disabled = false;
+            sendButton.disabled = false;
+            messageText.focus();
+        }
+    };
+
+    // Auto-expand textarea
+    messageText.addEventListener('input', function() {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+    });
+});

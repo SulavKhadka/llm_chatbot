@@ -3,46 +3,29 @@ import sounddevice as sd
 import numpy as np
 from scipy import signal
 import time
-
+import requests
 from uuid import uuid4
-from secret_keys import POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2
-from llm_chatbot import chatbot, utils, function_tools
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 
-# Initialize the ChatBot
-tools_prompt = TOOLS_PROMPT_SNIPPET.format(
-    TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.get_tools())
-)
-chatbot_system_msg = SYS_PROMPT.format(
-    TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW_2
-)
-db_config = {
-    "dbname": "chatbot_db",
-    "user": "chatbot_user",
-    "password": POSTGRES_DB_PASSWORD,
-    "host": "localhost",
-    "port": "5432",
-}
-
-
-llm_bot = chatbot.ChatBot(
-    model="qwen/qwen-2.5-72b-instruct",
-    tokenizer_model="Qwen/Qwen2.5-72B-Instruct",
-    system=chatbot_system_msg,
-    db_config=db_config,
-)
-
+@dataclass
+class ClientRequest:
+    user_id: str
+    client_type: str
+    message: str
+    user_metadata: dict
 
 def get_bot_response(user_message: str):
-    response = llm_bot(user_message)
-    response = utils.sanitize_inner_content(response)
-    root = ET.fromstring(f"<root>{response}</root>")
-
-    # Extract text from <response_to_user> tag
-    response_to_user = root.find(".//response_to_user")
-    return response_to_user.text
-
+    client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})
+    try:
+        response = requests.post("http://0.0.0.0:8000/sulav_test/message", json=client_request.__dict__, timeout=120)
+        if response.status_code == 200:
+            return response.text
+        return f"error processing bot response, status code: {response.status_code}"
+    except Exception as e:
+        print(e)
+        return f"error processing bot response, error: {e}"
+    
 
 class SpeechSegmenter:
     def __init__(
@@ -67,11 +50,12 @@ class SpeechSegmenter:
         self.chunk_duration = chunk_duration
 
         # Initialize ASR components
-        self.asr = FasterWhisperASR("en", "large-v2")
+        self.asr = FasterWhisperASR("en", "distil-large-v3")
         self.online = OnlineASRProcessor(self.asr)
 
         # Setup audio stream
         self.chunk_size = int(sample_rate * chunk_duration)
+        print(sd.query_devices())
         self.stream = sd.InputStream(
             samplerate=sample_rate,
             channels=1,
@@ -119,7 +103,7 @@ class SpeechSegmenter:
                         self.is_speaking = False
                         final_output = self.online.finish()
                         if final_output[2]:  # If there's text
-                            self.all_segments.append(final_output)
+                            self.all_segments.append(final_output[2])
 
                         user_input_segment = "".join(self.all_segments)
                         print("\nSpeech segment complete.\nUser:", user_input_segment)
@@ -153,7 +137,7 @@ class SpeechSegmenter:
             # Process any remaining audio
             final_output = self.online.finish()
             if final_output[2]:
-                self.all_segments.append(final_output)
+                self.all_segments.append(final_output[2])
 
             print("\nAll captured segments:")
             for i, segment in enumerate(self.all_segments, 1):
@@ -181,10 +165,10 @@ if __name__ == "__main__":
     from RealtimeTTS import TextToAudioStream, CoquiEngine
 
     tts_engine = CoquiEngine(
-        model_name="tts_models/multilingual/multi-dataset/bark",
+        model_name="tts_models/multilingual/multi-dataset/xtts_v2",
         full_sentences=True,
         speed=1.2,
-        stream_chunk_size=40,
+        stream_chunk_size=80,
         overlap_wav_len=2048,
         thread_count=12,
         sentence_silence_duration=0.4,

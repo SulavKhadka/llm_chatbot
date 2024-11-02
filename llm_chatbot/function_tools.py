@@ -10,16 +10,15 @@ from langchain.tools import tool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
 from langchain_community.utilities import ArxivAPIWrapper
-import random
-import io
-
-from secret_keys import OPENWATHERMAP_API_TOKEN
+from secret_keys import OPENWATHERMAP_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
 from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
+from llm_chatbot.tools.spotify_control import SpotifyTool
 import numpy as np
 from PIL import Image
 import os
 from typing import Union, Dict
+
 
 @tool
 def open_image_file(filepath: str):
@@ -447,6 +446,8 @@ def get_tool_list_prompt(tools):
 def get_tools():
     interpreter = UVPythonShellManager()
     session = interpreter.create_session()
+
+    spotify = SpotifyTool(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
     tool_dict = {}
     functions = [
         get_current_weather,
@@ -455,7 +456,15 @@ def get_tools():
         search_arxiv,
         open_image_file,
         tool(interpreter.run_command),
-        tool(interpreter.run_python_code)
+        tool(interpreter.run_python_code),
+        tool(spotify.get_current_playback),
+        tool(spotify.next_track),
+        tool(spotify.play_pause),
+        tool(spotify.previous_track),
+        tool(spotify.search_and_play),
+        tool(spotify.set_volume),
+        tool(spotify.get_devices),
+        tool(spotify.transfer_playback)
     ]
     for fn in functions:
         tool_schema = convert_to_openai_tool(fn)
