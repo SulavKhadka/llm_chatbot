@@ -1,3 +1,30 @@
+// Add at the beginning of the file
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/static/sw.js')
+      .then(registration => {
+        console.log('ServiceWorker registered:', registration);
+      })
+      .catch(error => {
+        console.log('ServiceWorker registration failed:', error);
+      });
+  });
+}
+
+// Add offline detection
+let isOnline = navigator.onLine;
+
+window.addEventListener('online', () => {
+  isOnline = true;
+  document.body.classList.remove('offline');
+  loadChats(); // Refresh data when coming back online
+});
+
+window.addEventListener('offline', () => {
+  isOnline = false;
+  document.body.classList.add('offline');
+});
+
 let activeChat = null;
 
 function formatDate(dateString) {
@@ -99,11 +126,18 @@ async function loadChat(chat) {
     
     const chatHeader = document.getElementById('chat-header');
     chatHeader.innerHTML = `
-        <h2>Chat ${chat.chat_id}</h2>
-        <div class="chat-header-meta">
-            <div>Model: ${chat.model.split('/').pop()}</div>
-            <div>Started: ${formatDate(chat.started_at)}</div>
-            <div>Messages: ${chat.message_count}</div>
+        <button class="menu-button" onclick="toggleChatList()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+            </svg>
+        </button>
+        <div class="header-content">
+            <h4>Chat ${chat.chat_id}</h4>
+            <div class="chat-header-meta">
+                <div>Model: ${chat.model.split('/').pop()}</div>
+                <div>Started: ${formatDate(chat.started_at)}</div>
+                <div>Messages: ${chat.message_count}</div>
+            </div>
         </div>
     `;
 
@@ -217,6 +251,11 @@ async function loadChat(chat) {
     
     // Scroll to bottom
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    // Hide chat list on mobile after selection
+    if (window.innerWidth <= 768) {
+        document.getElementById('chat-list').classList.remove('show');
+    }
 }
 
 // Initial load
@@ -304,6 +343,29 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.height = 'auto';
         this.style.height = (this.scrollHeight) + 'px';
     });
+
+    // Handle mobile menu
+    const menuButton = document.querySelector('.menu-button');
+    if (window.innerWidth <= 768) {
+        menuButton.style.display = 'block';
+    }
+    
+    // Close chat list when clicking outside on mobile
+    document.addEventListener('click', (e) => {
+        if (window.innerWidth <= 768) {
+            const chatList = document.getElementById('chat-list');
+            const menuButton = document.querySelector('.menu-button');
+            if (!chatList.contains(e.target) && !menuButton.contains(e.target)) {
+                chatList.classList.remove('show');
+            }
+        }
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+        const menuButton = document.querySelector('.menu-button');
+        menuButton.style.display = window.innerWidth <= 768 ? 'block' : 'none';
+    });
 });
 
 function createMessageElement(msg) {
@@ -389,4 +451,10 @@ function cancelMessageEdit(button) {
         .then(message => {
             messageDiv.replaceWith(createMessageElement(message));
         });
+}
+
+// Add at the start of the file after service worker registration
+function toggleChatList() {
+    const chatList = document.getElementById('chat-list');
+    chatList.classList.toggle('show');
 }

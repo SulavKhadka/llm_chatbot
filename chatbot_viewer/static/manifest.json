@@ -1,0 +1,35 @@
+{
+  "name": "Chat Viewer",
+  "short_name": "ChatView",
+  "description": "View and manage chat conversations",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "/static/icons/152.png",
+      "sizes": "152x152",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/167.png",
+      "sizes": "167x167",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/180.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+} 
