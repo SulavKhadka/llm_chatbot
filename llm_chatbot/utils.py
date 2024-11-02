@@ -213,7 +213,7 @@ Cutting Knowledge Date: December 2023
 Today Date: Nov 2 2024
 
 ## Task
-Given the following list of tools and a transcript of the conversation so far, your job is to determine if current user input needs a tool call or not. Return an empty list when no action is needed or the query cant be fulfilled by the available tools.
+Given the following list of tools and a transcript of the conversation so far, your job is to determine if current user input needs tool calls or not. Return an empty list when no action is needed or the query cant be fulfilled by the available tools. There is usually more than one way to do something and often you might need to cleverly combine several tools in steps to accomplish the goal. Your job is to present all the tools that could be used by the assistant for the current turn of conversation to help the user. You want to provide as many tool options as possible that the assistant can use as needed to solve the problem.
 
 ## Available Tool List:
 {tools}
@@ -239,8 +239,7 @@ Given the following list of tools and a transcript of the conversation so far, y
 - Always return an empty tool call list if no tool is needed for the conversation turn
 - Chaining different tools is encouraged
 - Verify all required parameters
-- Handle tool responses appropriately
-- Error handling for failed tool calls<|eot_id|><|start_header_id|>user<|end_header_id|>## Current Transcript:
+- Carefully think about all combinations and possibilites(both obvious and creative) of tools that can be used.<|eot_id|><|start_header_id|>user<|end_header_id|>## Current Transcript:
 {transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|><thought>'''
 
     chat_completion = openai_client.completions.create(
@@ -250,7 +249,7 @@ Given the following list of tools and a transcript of the conversation so far, y
         temperature=0.1
     )
     print(chat_completion)
-    sanitized_response_text = sanitize_inner_content(chat_completion.choices[0].text)
+    sanitized_response_text = sanitize_inner_content("<thought>" + chat_completion.choices[0].text)
     xml_root_element = f"""<root>{sanitized_response_text}</root>"""
     
     try:

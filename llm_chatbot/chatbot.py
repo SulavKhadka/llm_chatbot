@@ -597,12 +597,17 @@ class ChatBot:
         self.cur.close()
         self.conn.close()
 
-    def execute(self):
-        self.system['content'] = re.sub(pattern='<current_realtime_info>\n.*\n</current_realtime_info>', repl='', string=self.system['content'])
+    def execute(self, tool_suggestions):
+        self.system['content'] = re.sub(pattern='## Current Realtime Info\n.*\n\n## Tool Suggestions\n.*\n\## End\n', repl='', string=self.system['content'])
         current_info = f'''
-<current_realtime_info>
+## Current Realtime Info
 - Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-</current_realtime_info>'''
+- User: {self.user_id}
+
+## Tool Suggestions
+{tool_suggestions}
+## End
+'''
         self.system['content'] += current_info
         
         messages = [self.system]
