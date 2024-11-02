@@ -75,3 +75,17 @@ Can the bot handle this scenario?
 - for the next hour, every 5 mins, get the current weather and wind conditions and then alert me only if the wind is blowing above 10mph and temp is below 50F.
     - this needs to track and have a non user trigger to the bot loop, as well as an option to not respond until a crietria is met.
 
+Voice Mode:
+- If asked for code or something like that, we still output it but for voice output filter that out so it doesnt go over TTS but tells user to refer to a screen(chat window) for the code.
+- 
+
+- Need 
+
+U: hey can you help me plan my day, whats the weather and if i have any appointments let me know what the weather are for the ones i need to go out for
+A: <t>i need to see what tools can help me assist the user. I would need tools for getting the days weather forecast ideally by the hour, access to the calendar where the user has their appointments for the day, which i can then combine to see if any appointments leave the house and see the corresponding weather at that time to advise the user.<t><tool_call>[{"name": "", "parameters": ""}]</tool_call>
+
+
+how to test computer control and screenshot and other local features
+- screenshot and browser control can be tested by launching a browser then displaying certain test images, screenshoting then asking vlm for answers to the questions as a way to test multiple things at once.(need to carefully think about how one effects the other)
+- not sure how to test computer control
+

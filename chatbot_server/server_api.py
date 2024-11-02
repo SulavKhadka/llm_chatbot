@@ -60,8 +60,8 @@ def process_message(user_id: str, session_id: str, client_request: ClientRequest
     root = ET.fromstring(f"<root>{sanitized_response}</root>")
 
     if (only_user_response is False):
-        return response
+        return utils.unsanitize_content(sanitized_response)
     
     # Extract text from <response_to_user> tag
     response_to_user = root.find(".//response_to_user")
-    return response_to_user.text
+    return utils.unsanitize_content(response_to_user.text)

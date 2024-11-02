@@ -25,8 +25,8 @@
             --hover-color: #eff6ff;
             --code-bg: #1e293b;
             --code-text: #e2e8f0;
-            --thought-bg: #f8f7ff;
             --thought-border: #818cf8;
+            --thought-bg: #f8f7ff;
             --tool-call-bg: #fffbeb;
             --tool-call-border: #d97706;
             --tool-response-bg: #f0f9ff;
@@ -68,18 +68,18 @@
             }
             
             #chat-list {
-                position: absolute;
+                position: fixed;
                 left: 0;
                 top: 0;
                 bottom: 0;
                 width: 100%;
                 z-index: 10;
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
+                background: white;
+                display: none;
             }
             
             #chat-list.show {
-                transform: translateX(0);
+                display: block;
             }
             
             #chat-view {
@@ -94,7 +94,6 @@
             
             .menu-button {
                 display: block;
-                margin-right: 10px;
             }
         }
         
@@ -131,11 +130,11 @@
             padding: 12px;
             border-bottom: 1px solid var(--border-color);
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease;
         }
         
         .chat-item:hover {
-            background: var(--hover-color);
+            background-color: var(--hover-color);
         }
         
         .chat-item.active {
@@ -176,6 +175,7 @@
             background: var(--bg-color);
             word-break: break-word;
             box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            cursor: pointer;
         }
         
         .message.user .message-content {
@@ -370,15 +370,13 @@
         }
 
         .new-chat-button {
-            margin: 12px;
-            width: calc(100% - 24px);
-            padding: 8px;
+            width: 100%;
+            padding: 12px;
             background: var(--primary-color);
             color: white;
             border: none;
-            border-radius: 6px;
             cursor: pointer;
-            transition: background-color 0.2s;
+            margin-bottom: 12px;
         }
 
         .new-chat-button:hover {
@@ -388,10 +386,10 @@
         /* Responsive Design */
         @media (max-width: 768px) {
             #chat-list {
-                width: 30%;
+                width: 100%; /* Full width for chat list on mobile */
             }
             #chat-view {
-                width: 70%;
+                width: 100%;
             }
             .message {
                 max-width: 95%;
@@ -402,7 +400,7 @@
             }
         }
 
-        /* Add these styles to the existing CSS */
+        /* Edit & Offline Styles */
         .edit-textarea {
             width: 100%;
             min-height: 100px;
@@ -444,15 +442,6 @@
             font-style: italic;
         }
 
-        .message-content {
-            cursor: pointer;
-        }
-
-        .message-content:hover {
-            background: var(--hover-color);
-        }
-
-        /* Add to existing CSS */
         .offline {
             position: relative;
         }
@@ -517,14 +506,15 @@
                 display: block;
             }
             
+            #chat-header h6,
             #chat-header h2 {
-                margin: 0 0 8px 0;
+                margin: 0;
             }
         }
     </style>
 </head>
 <body>
-    <div id="chat-list"></div>
+    <div id="chat-list" class="show"></div>
     <div id="chat-view">
         <div id="chat-header">
             <button class="menu-button" onclick="toggleChatList()" style="display: none;">
@@ -532,7 +522,9 @@
                     <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
                 </svg>
             </button>
-            <div id="header-content"></div>
+            <div id="header-content">
+                <h6>Select a chat to view messages</h6>
+            </div>
         </div>
         <div id="messages">
             <div class="empty-state">
