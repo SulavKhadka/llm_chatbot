@@ -18,7 +18,7 @@ class ClientRequest:
 def get_bot_response(user_message: str):
     client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})
     try:
-        response = requests.post("http://0.0.0.0:8000/sulav_test/message", json=client_request.__dict__, timeout=120)
+        response = requests.post("http://0.0.0.0:8000/sulav_test/latest/message", json=client_request.__dict__, timeout=120)
         if response.status_code == 200:
             return response.text
         return f"error processing bot response, status code: {response.status_code}"
