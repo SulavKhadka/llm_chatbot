@@ -27,7 +27,7 @@ def index(user_id):
 def send_message(user_id, session_id):
     data = request.json
     response = requests.post(
-        f'http://localhost:8000/{user_id}/{session_id}/message',  # Adjust the port if needed
+        f'http://localhost:8000/{user_id}/{session_id}/message?only_user_response=false',
         json=data
     )
     return response.text
@@ -76,6 +76,7 @@ def get_chat_messages(chat_id):
             role,
             content,
             created_at,
+            updated_at,
             is_purged
         FROM chat_messages
         WHERE chat_id = %s
@@ -87,6 +88,43 @@ def get_chat_messages(chat_id):
     conn.close()
     
     return jsonify([dict(msg) for msg in messages])
+
+@app.route('/message/<message_id>', methods=['PUT'])
+def update_message(message_id):
+    data = request.json
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        UPDATE chat_messages 
+        SET content = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s
+        RETURNING id, role, content, created_at, updated_at, is_purged
+    """, (data['content'], message_id))
+    
+    updated_message = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    
+    return jsonify(dict(updated_message))
+
+@app.route('/message/<message_id>', methods=['GET'])
+def get_message(message_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    
+    cur.execute("""
+        SELECT id, role, content, created_at, updated_at, is_purged
+        FROM chat_messages
+        WHERE id = %s
+    """, (message_id,))
+    
+    message = cur.fetchone()
+    cur.close()
+    conn.close()
+    
+    return jsonify(dict(message))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)

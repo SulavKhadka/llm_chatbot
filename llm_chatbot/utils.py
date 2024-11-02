@@ -5,6 +5,7 @@ import openai
 import xml.etree.ElementTree as ET
 import re
 import xml.sax.saxutils as saxutils
+import json, ast
 
 def unsanitize_content(sanitized_output):
     """
@@ -198,3 +199,88 @@ Remember, your task is to ensure every payload has proper XML structure and tag 
         return ET.fromstring(f"<root>{corrected_response}</root>")
     else:
         return ET.fromstring(f"<root>{llm_response_text}</root>")
+    
+
+def tool_caller(tools: List, transcript: List[str]):
+    openai_client = openai.OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1"
+    )
+    
+    prompt = f'''f<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+Cutting Knowledge Date: December 2023
+Today Date: Nov 2 2024
+
+## Task
+Given the following list of tools and a transcript of the conversation so far, your job is to determine if current user input needs a tool call or not. Return an empty list when no action is needed or the query cant be fulfilled by the available tools.
+
+## Available Tool List:
+{tools}
+
+### Output Response XML Structure Requirements
+- All responses must be well-formed XML
+- Tags must be properly nested
+- Proper error handling
+
+### Tool Call Format
+```json
+<tool_call>[{{
+    "name": "function_name",
+    "parameters": {{
+        "param1": "value1",
+        "param2": "value2"
+    }}
+}}]</tool_call>
+```
+
+### Tool Usage Guidelines
+- Only use explicitly provided tools
+- Always return an empty tool call list if no tool is needed for the conversation turn
+- Chaining different tools is encouraged
+- Verify all required parameters
+- Handle tool responses appropriately
+- Error handling for failed tool calls<|eot_id|><|start_header_id|>user<|end_header_id|>## Current Transcript:
+{transcript}<|eot_id|><|start_header_id|>assistant<|end_header_id|><thought>'''
+
+    chat_completion = openai_client.completions.create(
+        model="meta-llama/llama-3.1-70b-instruct",
+        prompt=prompt,
+        max_tokens=4096,
+        temperature=0.1
+    )
+    print(chat_completion)
+    sanitized_response_text = sanitize_inner_content(chat_completion.choices[0].text)
+    xml_root_element = f"""<root>{sanitized_response_text}</root>"""
+    
+    try:
+        root = ET.fromstring(xml_root_element)
+    except ET.ParseError:
+        root = ensure_llm_response_format(chat_completion.choices[0].text)
+
+    tool_calls = []
+    for element in root.findall(".//tool_call"):
+        json_data = None
+        try:
+            json_text = element.text.strip()
+            try:
+                json_data = json.loads(json_text)
+            except json.JSONDecodeError as json_err:
+                try:
+                    json_data = ast.literal_eval(json_text)
+                except (SyntaxError, ValueError) as eval_err:
+                    # logger.error({"event": "JSON_parsing_failed", "json_decode_error": str(json_err), "fallback_error": str(eval_err), "problematic_json_text": json_text})
+                    continue
+        except Exception as e:
+            # logger.error({"event": "Cannot_strip_text", "error": str(e)})
+            pass
+
+        if json_data is not None:
+            if isinstance(json_data, list):
+                tool_calls.extend(json_data)
+            else:
+                tool_calls.append(json_data)
+            print({"event": "Extracted_tool_call", "tool_call": json_data})
+
+    print({"event": "Extracted_tool_calls", "count": len(tool_calls)})
+    return tool_calls

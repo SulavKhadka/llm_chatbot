@@ -47,7 +47,7 @@ def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
     return active_sessions[user_id]
 
 @app.post("/{user_id}/{session_id}/message")
-def process_message(user_id: str, session_id: str, client_request: ClientRequest):
+def process_message(user_id: str, session_id: str, client_request: ClientRequest, only_user_response: bool = True):
     if session_id.lower() == "latest":
         chatbot = get_session(user_id=user_id)
     else:
@@ -56,9 +56,12 @@ def process_message(user_id: str, session_id: str, client_request: ClientRequest
     print(client_request.message)
     response = chatbot(client_request.message)
     print(response)
-    response = utils.sanitize_inner_content(response)
-    root = ET.fromstring(f"<root>{response}</root>")
+    sanitized_response = utils.sanitize_inner_content(response)
+    root = ET.fromstring(f"<root>{sanitized_response}</root>")
 
+    if (only_user_response is False):
+        return response
+    
     # Extract text from <response_to_user> tag
     response_to_user = root.find(".//response_to_user")
     return response_to_user.text

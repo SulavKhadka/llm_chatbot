@@ -46,13 +46,20 @@ function tryParseJSON(str) {
     }
 }
 
-function formatMessageContent(content) {
+function formatMessageContent(content, isEditing = false) {
+    if (isEditing) {
+        return content;
+    }
+    
+    // Convert newlines to <br> tags first
+    content = content.replace(/\n/g, '<br>');
+    
     // Handle thought tags
     content = content.replace(/<thought>([\s\S]*?)<\/thought>/g, (match, thought) => {
         return `
             <div class="message-content thought-block">
                 <div class="tag-label">thought</div>
-                ${thought.trim()}
+                ${thought.trim().replace(/\n/g, '<br>')}
             </div>`;
     });
     
@@ -80,6 +87,9 @@ function formatMessageContent(content) {
                 <div class="json-content">${formattedJson}</div>
             </div>`;
     });
+    
+    // Handle any remaining text with newlines
+    content = content.replace(/([^>])\n/g, '$1<br>');
     
     return content;
 }
@@ -114,21 +124,7 @@ async function loadChat(chat) {
     
     messages.forEach(msg => {
         if(msg.role === 'system') return;  // Skip system messages
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${msg.role}`;
-        
-        const formattedContent = formatMessageContent(msg.content);
-        
-        messageDiv.innerHTML = `
-            <div class="message-content">${formattedContent}</div>
-            <div class="message-meta">
-                <span class="role-badge">${msg.role}</span>
-                <span>${formatDate(msg.created_at)}</span>
-                ${msg.is_purged ? '<span class="purged-indicator">purged</span>' : ''}
-            </div>
-        `;
-        
+        const messageDiv = createMessageElement(msg);
         messagesDiv.appendChild(messageDiv);
     });
     
@@ -202,21 +198,7 @@ async function loadChat(chat) {
     
     messages.forEach(msg => {
         if(msg.role === 'system') return;  // Skip system messages
-        
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${msg.role}`;
-        
-        const formattedContent = formatMessageContent(msg.content);
-        
-        messageDiv.innerHTML = `
-            <div class="message-content">${formattedContent}</div>
-            <div class="message-meta">
-                <span class="role-badge">${msg.role}</span>
-                <span>${formatDate(msg.created_at)}</span>
-                ${msg.is_purged ? '<span class="purged-indicator">purged</span>' : ''}
-            </div>
-        `;
-        
+        const messageDiv = createMessageElement(msg);
         messagesDiv.appendChild(messageDiv);
     });
     
@@ -294,7 +276,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const responseDiv = document.createElement('div');
             responseDiv.className = 'message assistant';
             responseDiv.innerHTML = `
-                <div class="message-content">${responseText}</div>
+                <div class="message-content">${formatMessageContent(responseText)}</div>
                 <div class="message-meta">
                     <span class="role-badge">assistant</span>
                     <span>${formatDate(new Date())}</span>
@@ -323,3 +305,88 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.height = (this.scrollHeight) + 'px';
     });
 });
+
+function createMessageElement(msg) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${msg.role}`;
+    messageDiv.dataset.messageId = msg.id;
+    
+    const formattedContent = formatMessageContent(msg.content);
+    const isEdited = msg.updated_at !== msg.created_at;
+    
+    messageDiv.innerHTML = `
+        <div class="message-content" onclick="toggleMessageEdit(this)">${formattedContent}</div>
+        <div class="message-meta">
+            <span class="role-badge">${msg.role}</span>
+            <span>${formatDate(msg.created_at)}</span>
+            ${isEdited ? `<span class="edited-indicator">(edited ${formatDate(msg.updated_at)})</span>` : ''}
+            ${msg.is_purged ? '<span class="purged-indicator">purged</span>' : ''}
+        </div>
+    `;
+    
+    return messageDiv;
+}
+
+async function toggleMessageEdit(contentDiv) {
+    const messageDiv = contentDiv.closest('.message');
+    const messageId = messageDiv.dataset.messageId;
+    
+    if (contentDiv.querySelector('textarea')) {
+        return; // Already in edit mode
+    }
+    
+    // Fetch the original message content from the server
+    const response = await fetch(`/message/${messageId}`);
+    const message = await response.json();
+    const originalContent = message.content;
+    
+    contentDiv.innerHTML = `
+        <textarea class="edit-textarea">${originalContent}</textarea>
+        <div class="edit-actions">
+            <button onclick="saveMessageEdit('${messageId}', this)">Save</button>
+            <button onclick="cancelMessageEdit(this)">Cancel</button>
+        </div>
+    `;
+    
+    const textarea = contentDiv.querySelector('textarea');
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+    textarea.focus();
+}
+
+async function saveMessageEdit(messageId, button) {
+    const contentDiv = button.closest('.message-content');
+    const textarea = contentDiv.querySelector('textarea');
+    const newContent = textarea.value;
+    
+    try {
+        const response = await fetch(`/message/${messageId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ content: newContent })
+        });
+        
+        const updatedMessage = await response.json();
+        const messageDiv = contentDiv.closest('.message');
+        messageDiv.replaceWith(createMessageElement(updatedMessage));
+        
+    } catch (error) {
+        console.error('Error updating message:', error);
+        alert('Error updating message. Please try again.');
+    }
+}
+
+function cancelMessageEdit(button) {
+    const contentDiv = button.closest('.message-content');
+    const messageDiv = contentDiv.closest('.message');
+    const messageId = messageDiv.dataset.messageId;
+    
+    // Reload the message to restore original content
+    fetch(`/message/${messageId}`)
+        .then(response => response.json())
+        .then(message => {
+            messageDiv.replaceWith(createMessageElement(message));
+        });
+}
