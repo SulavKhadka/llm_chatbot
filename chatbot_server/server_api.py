@@ -6,14 +6,15 @@ from llm_chatbot import utils, function_tools
 from uuid import uuid4
 import xml.etree.ElementTree as ET
 from secret_keys import POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2
+from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2, SYS_PROMPT_MD_TOP, SYS_PROMPT_MD_BOTTOM
 
-tools_prompt = TOOLS_PROMPT_SNIPPET.format(
-    TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.get_tools())
-)
-chatbot_system_msg = SYS_PROMPT.format(
-    TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW_2
-)
+# tools_prompt = TOOLS_PROMPT_SNIPPET.format(
+#     TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.get_tools())
+# )
+# chatbot_system_msg = SYS_PROMPT.format(
+#     TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW_2
+# )
+chatbot_system_msg = SYS_PROMPT_MD_TOP.format(TOOLS=function_tools.get_tool_list_prompt(function_tools.get_tools())) + SYS_PROMPT_MD_BOTTOM
 db_config = {
     "dbname": "chatbot_db",
     "user": "chatbot_user",
@@ -33,21 +34,25 @@ class ClientRequest:
 
 active_sessions: dict[str, ChatBot] = {}
 
-def get_session(user_id: str, model="Qwen/Qwen2.5-72B-Instruct"):
+def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
     if user_id not in active_sessions:
         active_sessions[user_id] = ChatBot(
             model = "Qwen/Qwen2.5-72B-Instruct-Turbo",
             tokenizer_model= "Qwen/Qwen2.5-72B-Instruct",
             user_id = user_id,
-            chat_id = str(uuid4()),
+            chat_id = str(uuid4()) if chat_id is None else chat_id,
             system=chatbot_system_msg,
             db_config=db_config
         )
     return active_sessions[user_id]
 
-@app.post("/{user_id}/message")
-def process_message(user_id: str, client_request: ClientRequest):
-    chatbot = get_session(user_id)
+@app.post("/{user_id}/{session_id}/message")
+def process_message(user_id: str, session_id: str, client_request: ClientRequest):
+    if session_id.lower() == "latest":
+        chatbot = get_session(user_id=user_id)
+    else:
+        chatbot = get_session(user_id=user_id, chat_id=session_id)
+    
     print(client_request.message)
     response = chatbot(client_request.message)
     print(response)
