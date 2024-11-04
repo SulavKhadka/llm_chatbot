@@ -89,3 +89,8 @@ how to test computer control and screenshot and other local features
 - screenshot and browser control can be tested by launching a browser then displaying certain test images, screenshoting then asking vlm for answers to the questions as a way to test multiple things at once.(need to carefully think about how one effects the other)
 - not sure how to test computer control
 
+Problem:
+- If i am talking from tts bot to it(which means a session is open for that and has been loaded to the chatbot class instance) and i switch to the same session in chatbot window and add a message continuing the conversation there, how will the tts_bot know there have been state updates to the db and that it needs to sync again?
+    - I think we need to be relying on db always even in a instatiated chatbot instance
+    - make the session state in a redis instance type thing and refresh storage for any DB activity on the tracked sessions: this captures multi device updates. 
+    - a global session keeper sounds like a good way to do sync across devices and users although we are only focused on devices at the moment

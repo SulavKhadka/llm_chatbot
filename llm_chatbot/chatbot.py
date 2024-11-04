@@ -20,10 +20,10 @@ from outlines import models, generate
 from outlines.models.openai import OpenAIConfig
 
 from llm_chatbot import function_tools, utils
+from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
 from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
 from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, RESPONSE_CFG_GRAMMAR
-
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -61,6 +61,7 @@ class ChatBot:
                 ]
             }
         }
+
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
@@ -69,7 +70,13 @@ class ChatBot:
                 "host": "100.78.237.8",
                 "port": "5432"
             }
-        
+
+        self.conversation_rag = VectorSearch(
+            db_config=db_config,
+            dimensions=256,
+            use_binary=False
+        )
+
         global logger
         self.user_id = user_id
         self.chat_id = chat_id
