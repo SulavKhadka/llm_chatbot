@@ -66,7 +66,7 @@ class ChatBot:
                 "dbname":"chatbot_db",
                 "user":"chatbot_user",
                 "password": POSTGRES_DB_PASSWORD,
-                "host": "localhost",
+                "host": "100.78.237.8",
                 "port": "5432"
             }
         
@@ -127,8 +127,11 @@ class ChatBot:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
                     tool_call_responses = []
                     for tool_call in tool_calls:
-                        fn_response = self._execute_function_call(tool_call)
-                        tool_call_responses.append(fn_response)
+                        try:
+                            fn_response = self._execute_function_call(tool_call)
+                            tool_call_responses.append(fn_response)
+                        except Exception as e:
+                            tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
                     self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_call_responses}\n</tool_call_response>"})
                     continue
                 else:
@@ -140,7 +143,7 @@ class ChatBot:
                 response = f"{llm_thought}\n<response_to_user>{parsed_response['response']['response']}</response_to_user>"
 
             if parsed_response['response']['type'] == "SELF_RESPONSE":
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"})
+                response = f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"
                 continue
 
         logger.info({"event": "Assistant_response", "response": response})
@@ -603,7 +606,7 @@ class ChatBot:
         self.conn.close()
 
     def execute(self, tool_suggestions):
-        self.system['content'] = re.sub(pattern='## Current Realtime Info\n.*\n\n## Tool Suggestions\n.*\n\## End\n', repl='', string=self.system['content'])
+        self.system['content'] = re.sub(pattern='## Current Realtime Info\n.*\n\n## Tool Suggestions\n.*\n\n## End\n', repl='', string=self.system['content'])
         current_info = f'''
 ## Current Realtime Info
 - Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
@@ -611,6 +614,7 @@ class ChatBot:
 
 ## Tool Suggestions
 {tool_suggestions}
+
 ## End
 '''
         self.system['content'] += current_info

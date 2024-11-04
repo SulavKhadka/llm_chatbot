@@ -11,7 +11,7 @@ DB_CONFIG = {
     "dbname": "chatbot_db",
     "user": "chatbot_user",
     "password": POSTGRES_DB_PASSWORD,
-    "host": "localhost",
+    "host": "100.78.237.8",
     "port": "5432"
 }
 
