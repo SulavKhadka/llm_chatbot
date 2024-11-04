@@ -35,7 +35,18 @@ things needed:
     - scheduled: doesnt need to happen right now, need to be done before next session or some other timeframe larger than the current turn/session.
 
 
+BUGS:
+[ ] sys message gets pasted twice
+[ ] if the system fails to response and we send another message, two user messages get added back to back, Need to add try catch and make the assistant response a internal error
+[ ] when loading a session state back after X time. the same openai_client might not be serving the backend(or shouldnt be required to) so instead of failing we should be able to switch over to the same model on a different provider or in the case of the model not being available across providers, continue on with one that is available.
+[ ] If i am talking from tts bot to it(which means a session is open for that and has been loaded to the chatbot class instance) and i switch to the same session in chatbot window and add a message continuing the conversation there, how will the tts_bot know there have been state updates to the db and that it needs to sync again?
+    - I think we need to be relying on db always even in a instatiated chatbot instance
+    - make the session state in a redis instance type thing and refresh storage for any DB activity on the tracked sessions: this captures multi device updates. 
+    - a global session keeper sounds like a good way to do sync across devices and users although we are only focused on devices at the moment
 
+
+
+THOUGHTS (TO BE ARRANGED LATER):
 
              -> sys02: subconcious  -> 
 user input -|
@@ -48,22 +59,11 @@ sys02:
     - what is the current context for this input? current conversation transcript + RAG_tool_call into previous conversations instances.
     - what do i need to know or am not confident about that i need to research to respond to this question? RAG_TOOL_CALL for external info
 
-
 user_input
     -> tool_call: find relevant snippets from previous interactions
     -> sys02: internal yapping
         -> smol_model: what is this [input] asking?
         -> smol_model: what do I need to know or an not confident about in [input] that i need to research?
-
-
-
-
-BUGS:
-- sys message gets pasted twice
-- if the system fails to response and we send another message, two user messages get added back to back, Need to add try catch and make the assistant response a internal error
-- when loading a session state back after X time. the same openai_client might not be serving the backend(or shouldnt be required to) so instead of failing we should be able to switch over to the same model on a different provider or in the case of the model not being available across providers, continue on with one that is available.
-
-
 
 metadata per message: this granularity is required to give the agent context of time and conversation patterns(maybe even let it decide how long it wants to wait to respond instead of always responding immediately)
     CURRENT_DATETIME
@@ -75,3 +75,25 @@ Can the bot handle this scenario?
 - for the next hour, every 5 mins, get the current weather and wind conditions and then alert me only if the wind is blowing above 10mph and temp is below 50F.
     - this needs to track and have a non user trigger to the bot loop, as well as an option to not respond until a crietria is met.
 
+Voice Mode:
+- If asked for code or something like that, we still output it but for voice output filter that out so it doesnt go over TTS but tells user to refer to a screen(chat window) for the code.
+- Not Lists or markdown format for voice based replies
+- short voice like talking length responses and not an essay
+- no links or things that need to be opened as voice might mean on the go, maybe need to know if they have access to screen
+
+Text Mode:
+- Markdown formatting preferred. Lists are fine
+- can send links and such to be opened 
+
+how to test computer control and screenshot and other local features?
+- screenshot and browser control can be tested by launching a browser then displaying certain test images, screenshoting then asking vlm for answers to the questions as a way to test multiple things at once.(need to carefully think about how one effects the other)
+- not sure how to test computer control
+
+for a "body" since i have a RAE driving robot i was thinking of how to have it embody the car:
+    - a model that constantly outputs driving signal(something like openpilot that comma ai has) conditioned on the current agent state and global
+    - inputs: map, current position on the map, goal positon, current agent state
+    - ouputs: some set of direction and speed at so many times a second frequency  
+
+needs to be able to use homeassistant, eiter through api or VLM based application browsing
+maps tool
+philips hue tool

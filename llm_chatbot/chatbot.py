@@ -20,10 +20,10 @@ from outlines import models, generate
 from outlines.models.openai import OpenAIConfig
 
 from llm_chatbot import function_tools, utils
+from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
 from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
 from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, RESPONSE_CFG_GRAMMAR
-
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -61,15 +61,22 @@ class ChatBot:
                 ]
             }
         }
+
         if db_config is None:
             db_config = {
                 "dbname":"chatbot_db",
                 "user":"chatbot_user",
                 "password": POSTGRES_DB_PASSWORD,
-                "host": "localhost",
+                "host": "100.78.237.8",
                 "port": "5432"
             }
-        
+
+        self.conversation_rag = VectorSearch(
+            db_config=db_config,
+            dimensions=256,
+            use_binary=False
+        )
+
         global logger
         self.user_id = user_id
         self.chat_id = chat_id
@@ -103,9 +110,14 @@ class ChatBot:
         self_recurse = True
         recursion_counter = 0
         while self_recurse and recursion_counter < self.max_recurse_depth:
+            # Tool Caller Testing
+            transcript = [m for m in self.messages if m.get('role', 'system') != 'system']
+            tool_suggestions = utils.tool_caller(self.functions, transcript)
+            logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
+            
             self.rolling_memory()
             try:
-                completion = self.execute()
+                completion = self.execute(tool_suggestions)
                 parsed_response = self._parse_results(completion.choices[0].message.content)
             except Exception as e:
                 completion = f"<thought>looks like there was an error in my execution while processing user response</thought><internal_response>Error Details:\n\n{e}</internal_response>"
@@ -122,8 +134,11 @@ class ChatBot:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
                     tool_call_responses = []
                     for tool_call in tool_calls:
-                        fn_response = self._execute_function_call(tool_call)
-                        tool_call_responses.append(fn_response)
+                        try:
+                            fn_response = self._execute_function_call(tool_call)
+                            tool_call_responses.append(fn_response)
+                        except Exception as e:
+                            tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
                     self._add_message({"role": "tool", "content": f"<tool_call_response>\n{tool_call_responses}\n</tool_call_response>"})
                     continue
                 else:
@@ -135,7 +150,7 @@ class ChatBot:
                 response = f"{llm_thought}\n<response_to_user>{parsed_response['response']['response']}</response_to_user>"
 
             if parsed_response['response']['type'] == "SELF_RESPONSE":
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"})
+                response = f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"
                 continue
 
         logger.info({"event": "Assistant_response", "response": response})
@@ -481,7 +496,7 @@ class ChatBot:
 
             logger.debug({"event": "Function_call_details", "name": function_name, "args": function_args})
             try:
-                function_response = function_to_call.func(*function_args.values())
+                function_response = function_to_call.func(**function_args)
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'
@@ -597,12 +612,18 @@ class ChatBot:
         self.cur.close()
         self.conn.close()
 
-    def execute(self):
-        self.system['content'] = re.sub(pattern='<current_realtime_info>\n.*\n</current_realtime_info>', repl='', string=self.system['content'])
+    def execute(self, tool_suggestions):
+        self.system['content'] = re.sub(pattern='## Current Realtime Info\n.*\n\n## Tool Suggestions\n.*\n\n## End\n', repl='', string=self.system['content'])
         current_info = f'''
-<current_realtime_info>
+## Current Realtime Info
 - Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-</current_realtime_info>'''
+- User: {self.user_id}
+
+## Tool Suggestions
+{tool_suggestions}
+
+## End
+'''
         self.system['content'] += current_info
         
         messages = [self.system]

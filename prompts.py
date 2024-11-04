@@ -535,10 +535,6 @@ Input -> <thought> -> [tool_call|internal_response|response_to_user] -> Output
 }}]</tool_call>
 ```
 
-## Tool Integration System
-### Available Tools
-{TOOLS}
-
 ### Tool Usage Guidelines
 - Only use explicitly provided tools
 - Verify all required parameters

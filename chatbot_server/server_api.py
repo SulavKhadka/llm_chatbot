@@ -14,7 +14,7 @@ from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2, SYS_PROMP
 # chatbot_system_msg = SYS_PROMPT.format(
 #     TOOLS_PROMPT=tools_prompt, RESPONSE_FLOW=RESPONSE_FLOW_2
 # )
-chatbot_system_msg = SYS_PROMPT_MD_TOP.format(TOOLS=function_tools.get_tool_list_prompt(function_tools.get_tools())) + SYS_PROMPT_MD_BOTTOM
+chatbot_system_msg = SYS_PROMPT_MD_TOP + SYS_PROMPT_MD_BOTTOM
 db_config = {
     "dbname": "chatbot_db",
     "user": "chatbot_user",
@@ -60,8 +60,8 @@ def process_message(user_id: str, session_id: str, client_request: ClientRequest
     root = ET.fromstring(f"<root>{sanitized_response}</root>")
 
     if (only_user_response is False):
-        return response
+        return utils.unsanitize_content(sanitized_response)
     
     # Extract text from <response_to_user> tag
     response_to_user = root.find(".//response_to_user")
-    return response_to_user.text
+    return utils.unsanitize_content(response_to_user.text)

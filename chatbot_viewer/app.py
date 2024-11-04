@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
@@ -11,7 +11,7 @@ DB_CONFIG = {
     "dbname": "chatbot_db",
     "user": "chatbot_user",
     "password": POSTGRES_DB_PASSWORD,
-    "host": "localhost",
+    "host": "100.78.237.8",
     "port": "5432"
 }
 
@@ -19,8 +19,14 @@ def get_db_connection():
     conn = psycopg2.connect(**DB_CONFIG)
     return conn
 
+@app.route('/')
+def root():
+    return render_template('login.html')
+
 @app.route('/<user_id>')
 def index(user_id):
+    if not user_id:
+        return redirect('/')
     return render_template('index.html', user_id=user_id)
 
 @app.route('/api/<user_id>/<session_id>/message', methods=['POST'])
@@ -125,6 +131,13 @@ def get_message(message_id):
     conn.close()
     
     return jsonify(dict(message))
+
+@app.route('/static/sw.js')
+def serve_service_worker():
+    response = app.send_static_file('sw.js')
+    response.headers['Content-Type'] = 'application/javascript'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)
