@@ -496,7 +496,7 @@ class ChatBot:
 
             logger.debug({"event": "Function_call_details", "name": function_name, "args": function_args})
             try:
-                function_response = function_to_call.func(*function_args.values())
+                function_response = function_to_call.func(**function_args)
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'

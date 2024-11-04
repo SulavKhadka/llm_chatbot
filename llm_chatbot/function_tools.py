@@ -10,10 +10,19 @@ from langchain.tools import tool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
 from langchain_community.utilities import ArxivAPIWrapper
-from secret_keys import OPENWATHERMAP_API_TOKEN, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+from secret_keys import (
+    OPENWATHERMAP_API_TOKEN,
+    SPOTIFY_CLIENT_ID,
+    SPOTIFY_CLIENT_SECRET,
+    HUE_USER,
+    HUE_CLIENT_SECRET,
+    HUE_CLIENT_ID,
+    HUE_BRIDGE_IP
+)
 from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
 from llm_chatbot.tools.spotify_control import SpotifyTool
+from llm_chatbot.tools.philips_hue_tool import PhilipsHueTool
 import numpy as np
 from PIL import Image
 import os
@@ -34,7 +43,7 @@ def open_image_file(filepath: str):
             representing a valid file path on the system where the code is running.
 
     Returns:
-        Union[np.ndarray, Dict[str, str]]: 
+        Union[np.ndarray, Dict[str, str]]:
         - If successful, returns a NumPy array representing the image data.
           The shape of the array will be (height, width, channels) for color images,
           or (height, width) for grayscale images.
@@ -70,41 +79,37 @@ def open_image_file(filepath: str):
     try:
         # Check if file exists
         if not os.path.isfile(filepath):
-            return {
-                'status': 'error',
-                'message': f"File not found: {filepath}"
-            }
+            return {"status": "error", "message": f"File not found: {filepath}"}
 
         # Attempt to open the image
         with Image.open(filepath) as img:
             # Convert image to RGB if it's in a different mode (e.g., RGBA)
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
+            if img.mode != "RGB":
+                img = img.convert("RGB")
         return img
 
     except IOError as e:
         return {
-            'status': 'error',
-            'message': f"IOError: Unable to open image file. {str(e)}"
+            "status": "error",
+            "message": f"IOError: Unable to open image file. {str(e)}",
         }
     except Exception as e:
-        return {
-            'status': 'error',
-            'message': f"An unexpected error occurred: {str(e)}"
-        }
+        return {"status": "error", "message": f"An unexpected error occurred: {str(e)}"}
+
+
 # create an agent
 @tool
 def get_current_weather(location: str, unit: str) -> str:
     """
     Fetch current weather data for a given location using the OpenWeatherMap API.
 
-    This tool provides detailed weather information for a specified location. It's useful when you need 
-    up-to-date weather data for a particular city or region. The tool uses geocoding to convert location 
+    This tool provides detailed weather information for a specified location. It's useful when you need
+    up-to-date weather data for a particular city or region. The tool uses geocoding to convert location
     names into coordinates, ensuring accurate results even for less common locations.
 
     Args:
-        location (str): The name of the location for which to fetch weather data. This can be a city name 
-            or a combination of city and country code (e.g., "London" or "London,UK"). The more specific 
+        location (str): The name of the location for which to fetch weather data. This can be a city name
+            or a combination of city and country code (e.g., "London" or "London,UK"). The more specific
             the location, the more accurate the results will be.
         unit (str): The unit system for temperature and wind speed measurements. Must be one of:
             - 'standard': Temperature in Kelvin, wind speed in meters/sec
@@ -112,7 +117,7 @@ def get_current_weather(location: str, unit: str) -> str:
             - 'imperial': Temperature in Fahrenheit, wind speed in miles/hour
 
     Returns:
-        str: A string representation of a dictionary containing detailed weather information. The dictionary 
+        str: A string representation of a dictionary containing detailed weather information. The dictionary
         includes the following keys:
             - location (str): Name of the location as recognized by the API.
             - country (str): Two-letter country code of the location.
@@ -128,7 +133,7 @@ def get_current_weather(location: str, unit: str) -> str:
         requests.exceptions.RequestException: If there's an error in making the API request or processing the response.
 
     Note:
-        This tool requires a valid OpenWeatherMap API key to be set in the environment variables. 
+        This tool requires a valid OpenWeatherMap API key to be set in the environment variables.
         For best results, use clear and unambiguous location names.
     """
     # API endpoint
@@ -179,13 +184,14 @@ def get_current_weather(location: str, unit: str) -> str:
         print(f"An error occurred while fetching weather data: {e}")
         return None
 
+
 @tool
 def web_search(query: str):
     """
     Perform a web search and return formatted results.
 
-    This tool conducts a web search using the provided query and returns a list of relevant search results. 
-    It's useful for gathering information on a wide range of topics, finding recent news, or discovering 
+    This tool conducts a web search using the provided query and returns a list of relevant search results.
+    It's useful for gathering information on a wide range of topics, finding recent news, or discovering
     websites related to a specific subject.
 
     Args:
@@ -193,16 +199,16 @@ def web_search(query: str):
             looking for. More specific queries tend to yield more relevant results.
 
     Returns:
-        List[Dict]: A list of dictionaries, where each dictionary represents a single search result. 
+        List[Dict]: A list of dictionaries, where each dictionary represents a single search result.
         Each dictionary contains the following keys:
             - title (str): The title of the web page or document.
             - url (str): The full URL of the web page or document.
-            - description (str): A brief excerpt or summary of the web page content, highlighting 
+            - description (str): A brief excerpt or summary of the web page content, highlighting
               relevant parts of the text that match the search query.
 
     Note:
         - The tool does not provide the full content of web pages, only summaries and links.
-        - The relevance and order of results are determined by the search API's algorithms and 
+        - The relevance and order of results are determined by the search API's algorithms and
           may not always perfectly match the user's intentions.
     """
     results = web_search_api(query)
@@ -215,36 +221,37 @@ def web_search(query: str):
                     "title": result.get("title", "N/A"),
                     "url": result.get("url", "N/A"),
                     "description": result.get("description", "N/A"),
-                    "age": result.get("age", "N/A")
+                    "age": result.get("age", "N/A"),
                 }
             )
     return formatted_results
+
 
 @tool
 def take_screenshots(save=False):
     """
     Capture screenshots of all monitors and return them as PIL Image objects.
 
-    This tool captures screenshots from all available monitors connected to the system. 
+    This tool captures screenshots from all available monitors connected to the system.
     It's useful for capturing the content of the local screen, for visual navigation and problem solving.
 
     Args:
-        save (bool, optional): If True, each screenshot will be saved as a PNG file in the current 
+        save (bool, optional): If True, each screenshot will be saved as a PNG file in the current
             directory. If False, screenshots are only returned as Image objects. Defaults to False.
 
     Returns:
-        List[Image.Image]: A list of PIL Image objects, each representing a screenshot from one monitor. 
+        List[Image.Image]: A list of PIL Image objects, each representing a screenshot from one monitor.
         The list is ordered by monitor number, excluding the first "all in one" virtual monitor.
 
     Note:
-        - This tool skips the first monitor in the list, which is typically a virtual "all in one" monitor 
+        - This tool skips the first monitor in the list, which is typically a virtual "all in one" monitor
           that represents the combined area of all physical monitors.
         - The tool captures the entire area of each monitor, including all visible windows and the desktop.
-        - If 'save' is True, screenshots are saved with filenames that include the monitor number and a 
+        - If 'save' is True, screenshots are saved with filenames that include the monitor number and a
           timestamp, e.g., "screenshot_monitor2_20230615_120530.png".
-        - This tool may not work as expected in all environments, particularly those without a graphical 
+        - This tool may not work as expected in all environments, particularly those without a graphical
           interface or with unusual monitor configurations.
-        - The returned Image objects can be further processed or analyzed using PIL (Python Imaging Library) 
+        - The returned Image objects can be further processed or analyzed using PIL (Python Imaging Library)
           functions if needed.
     """
     # Create an instance of mss
@@ -272,52 +279,54 @@ def take_screenshots(save=False):
                 print(f"Screenshot saved as {filename}")
     return screenshots
 
+
 @tool
 def generate_image():
     """
     Generates an image based on a given image query.
 
-    This tool creates a new image based on a textual description or prompt. It's useful for generating 
-    custom illustrations, visualizing concepts, or creating artistic interpretations of ideas. The tool 
+    This tool creates a new image based on a textual description or prompt. It's useful for generating
+    custom illustrations, visualizing concepts, or creating artistic interpretations of ideas. The tool
     uses an AI-based image generation model to produce the image.
 
     Args:
-        None: This function doesn't take any arguments directly. The image query or prompt should be 
+        None: This function doesn't take any arguments directly. The image query or prompt should be
         provided through the context or conversation leading up to the use of this tool.
 
     Returns:
-        None: This function doesn't return a value directly. The generated image is typically made 
+        None: This function doesn't return a value directly. The generated image is typically made
         available through a side effect, such as saving to a file or displaying in the user interface.
 
     Note:
-        - The quality and accuracy of the generated image depend on the clarity and specificity of the 
+        - The quality and accuracy of the generated image depend on the clarity and specificity of the
           image query provided in the conversation context.
-        - The image generation process may take some time, depending on the complexity of the query and 
+        - The image generation process may take some time, depending on the complexity of the query and
           the underlying model's processing speed.
-        - The tool may have limitations on the types of images it can generate, based on content policies 
+        - The tool may have limitations on the types of images it can generate, based on content policies
           and the capabilities of the underlying model.
         - The generated image is a new creation and does not represent or reproduce any existing copyrighted image.
         - If the image query is ambiguous or too complex, the result may not match the user's expectations precisely.
     """
     pass
 
+
 @tool
 def search_pubmed(query: str, max_result_chars: int = 2500):
     """
     Search PubMed database and return formatted results.
 
-    This tool performs a search query on the PubMed database, which is a free resource supporting the search 
-    and retrieval of biomedical and life sciences literature. It's particularly useful for finding scientific 
+    This tool performs a search query on the PubMed database, which is a free resource supporting the search
+    and retrieval of biomedical and life sciences literature. It's particularly useful for finding scientific
     articles, research papers, and medical studies on a wide range of topics in the life sciences and healthcare.
 
     Args:
-        query (str): The search query string. This should be a clear and concise description of the topic 
+        query (str): The search query string. This should be a clear and concise description of the topic
             or keywords you're searching for. More specific queries tend to yield more relevant results.
-        max_result_chars (int, optional): The maximum number of characters to return in the result content. 
+        max_result_chars (int, optional): The maximum number of characters to return in the result content.
             This helps to limit the size of the returned data. Defaults to 2500 characters.
 
     Returns:
-        The return type is not specified in the original function, but it likely returns a list or dictionary 
+        The return type is not specified in the original function, but it likely returns a list or dictionary
         containing the search results. Each result may include details such as:
         - Title of the article
         - Authors
@@ -331,34 +340,35 @@ def search_pubmed(query: str, max_result_chars: int = 2500):
         - The tool uses the PubmedQueryRun class to perform the search, which may have its own specific behavior and limitations.
         - The number of results returned may be limited by the PubMed API and the max_result_chars parameter.
         - Results are typically sorted by relevance, with the most recent and most relevant articles appearing first.
-        - This tool provides access to scientific literature and may return technical or complex information. 
+        - This tool provides access to scientific literature and may return technical or complex information.
           Interpretation of the results may require domain expertise.
         - Due to the max_result_chars limitation, full article texts are not provided, only metadata and possibly abstracts.
         - The search covers a vast database, but it may not include the very latest publications due to indexing delays.
     """
     pub = PubmedQueryRun()
     pub.api_wrapper.doc_content_chars_max = max_result_chars
-    
+
     return pub.invoke(query)
+
 
 @tool
 def search_arxiv(query: str, max_result_chars: int = 2500):
     """
     Search arXiv database and return formatted results.
 
-    This tool performs a search query on the arXiv database, which is an open-access archive for scholarly 
+    This tool performs a search query on the arXiv database, which is an open-access archive for scholarly
     articles in STEM fields. It's particularly useful for finding pre-print and published research papers
     across these disciplines.
 
     Args:
-        query (str): The search query string. This should be a clear and concise description of the topic 
-            or keywords you're searching for. More specific queries tend to yield more relevant results. 
+        query (str): The search query string. This should be a clear and concise description of the topic
+            or keywords you're searching for. More specific queries tend to yield more relevant results.
             The query can include author names, titles, abstracts, or specific arXiv IDs.
-        max_result_chars (int, optional): The maximum number of characters to return in the result content. 
+        max_result_chars (int, optional): The maximum number of characters to return in the result content.
             This helps to limit the size of the returned data. Defaults to 2500 characters.
 
     Returns:
-        str: A string containing the formatted search results. The exact format may depend on the 
+        str: A string containing the formatted search results. The exact format may depend on the
         ArxivAPIWrapper implementation, but typically includes:
         - Title of the paper
         - Authors
@@ -368,51 +378,52 @@ def search_arxiv(query: str, max_result_chars: int = 2500):
         - URL to the full paper
 
     Note:
-        - Results are typically sorted by relevance and date, with the most recent and most relevant 
+        - Results are typically sorted by relevance and date, with the most recent and most relevant
           papers appearing first.
-        - This tool provides access to scholarly articles which may be highly technical. Interpretation 
+        - This tool provides access to scholarly articles which may be highly technical. Interpretation
           of the results may require domain expertise.
-        - Due to the max_result_chars limitation, full paper texts are not provided, only metadata 
+        - Due to the max_result_chars limitation, full paper texts are not provided, only metadata
           and possibly abstracts.
-        - arXiv covers specific fields of study. If your query is outside these fields, you may not 
+        - arXiv covers specific fields of study. If your query is outside these fields, you may not
           get relevant results.
-        - The search covers both pre-prints and published papers. Pre-prints may not have undergone 
+        - The search covers both pre-prints and published papers. Pre-prints may not have undergone
           peer review, so results should be interpreted with this in mind.
     """
     arx = ArxivAPIWrapper()
     arx.api_wrapper.doc_content_chars_max = max_result_chars
     return arx.run(query)
 
+
 @tool
 def query_vlm(image_path: str, query: str) -> str:
     """
     Perform a visual query on an image using a Vision Language Model.
 
-    This tool opens an image from a local directory and applies a specified query to that image 
-    using a Vision Language Model (VLM). It's useful for tasks such as object detection, scene 
+    This tool opens an image from a local directory and applies a specified query to that image
+    using a Vision Language Model (VLM). It's useful for tasks such as object detection, scene
     description, text recognition in images, or answering specific questions about the image content.
 
     Args:
-        image_path (str): The file path to the image. This should be a valid path to an image file 
+        image_path (str): The file path to the image. This should be a valid path to an image file
             in a format supported by PIL (e.g., JPG, PNG, BMP).
-        query (str): The query or question to ask about the image. This can be a description request, 
+        query (str): The query or question to ask about the image. This can be a description request,
             a specific question about the image content, or any other prompt that the VLM can process.
 
     Returns:
-        str: Either the response from the Vision Language Model based on the image and query, or 
-        an error message if something went wrong. The exact format and content of the successful 
-        response will depend on the query and the capabilities of the underlying VLM. Error messages 
+        str: Either the response from the Vision Language Model based on the image and query, or
+        an error message if something went wrong. The exact format and content of the successful
+        response will depend on the query and the capabilities of the underlying VLM. Error messages
         will describe what went wrong during the process.
 
     Note:
-        - The performance and accuracy of the results depend on the underlying Vision Language Model, 
+        - The performance and accuracy of the results depend on the underlying Vision Language Model,
           which is not specified in this function.
         - The function does not modify the original image file.
-        - If an error occurs (e.g., file not found, invalid image format, empty inputs), the function 
+        - If an error occurs (e.g., file not found, invalid image format, empty inputs), the function
           will return an error message as a string rather than raising an exception.
     """
     from llm_chatbot.tools.vlm_image_processor import query_image
-    
+
     try:
         if not image_path.strip():
             raise ValueError("Image path cannot be empty.")
@@ -434,6 +445,7 @@ def query_vlm(image_path: str, query: str) -> str:
     except Exception as e:
         return f"An unexpected error occurred: {str(e)}"
 
+
 def get_tool_list_prompt(tools):
     tool_desc_list = []
     for name, tool_fn in tools.items():
@@ -447,7 +459,11 @@ def get_tools():
     interpreter = UVPythonShellManager()
     session = interpreter.create_session()
 
-    spotify = SpotifyTool(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+    spotify = SpotifyTool(
+        client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET
+    )
+    hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
+
     tool_dict = {}
     functions = [
         get_current_weather,
@@ -464,9 +480,19 @@ def get_tools():
         tool(spotify.search_and_play),
         tool(spotify.set_volume),
         tool(spotify.get_devices),
-        tool(spotify.transfer_playback)
+        tool(spotify.transfer_playback),
+        tool(hue_tool.control_light),
+        tool(hue_tool.activate_scene),
+        tool(hue_tool.control_room_lights),
+        tool(hue_tool.get_all_lights),
+        tool(hue_tool.get_all_rooms),
+        tool(hue_tool.get_all_scenes),
+        tool(hue_tool.get_light_state),
     ]
     for fn in functions:
         tool_schema = convert_to_openai_tool(fn)
-        tool_dict[tool_schema["function"]["name"]] = {"schema": tool_schema, "function": fn}
+        tool_dict[tool_schema["function"]["name"]] = {
+            "schema": tool_schema,
+            "function": fn,
+        }
     return tool_dict
