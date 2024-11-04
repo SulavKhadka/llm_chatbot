@@ -56,10 +56,12 @@ class SpotifyTool:
                 print("5. Copy the ENTIRE URL from your browser's address bar")
                 print("   (It should start with 'http://localhost:8888/callback?code=')")
                 print("\nPress Enter to open the authorization page...")
+                
+                auth_url = auth_manager.get_authorize_url()
+                print(f"Auth URL: {auth_url}")
                 input()
                 
                 # Get the authorization URL and open it
-                auth_url = auth_manager.get_authorize_url()
                 webbrowser.open(auth_url)
                 
                 print("\nAfter authorizing, paste the URL you were redirected to:")
