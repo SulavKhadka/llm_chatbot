@@ -103,9 +103,14 @@ class ChatBot:
         self_recurse = True
         recursion_counter = 0
         while self_recurse and recursion_counter < self.max_recurse_depth:
+            # Tool Caller Testing
+            transcript = [m for m in self.messages if m.get('role', 'system') != 'system']
+            tool_suggestions = utils.tool_caller(self.functions, transcript)
+            logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
+            
             self.rolling_memory()
             try:
-                completion = self.execute()
+                completion = self.execute(tool_suggestions)
                 parsed_response = self._parse_results(completion.choices[0].message.content)
             except Exception as e:
                 completion = f"<thought>looks like there was an error in my execution while processing user response</thought><internal_response>Error Details:\n\n{e}</internal_response>"
