@@ -1,6 +1,6 @@
 import requests
 from typing import Dict, List, Optional, Union
-import json
+import inspect
 from urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
@@ -20,6 +20,34 @@ class PhilipsHueTool:
         self.base_url = f"https://{bridge_ip}/clip/v2"
         self.headers = {"hue-application-key": api_key}
     
+    def get_available_methods(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of all public methods in the class along with their docstrings.
+        
+        Returns:
+            List of dictionaries containing method names and their documentation.
+            Each dictionary has:
+                - name: Method name
+                - docstring: Method documentation
+                - signature: Method signature
+        """
+        methods = []
+        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
+            # Skip private methods (those starting with _)
+            if not name.startswith('_'):
+                # Get the method's signature
+                signature = str(inspect.signature(method))
+                # Get the method's docstring, clean it up and handle None case
+                docstring = inspect.getdoc(method) or "No documentation available"
+                
+                methods.append({
+                    "name": name,
+                    "docstring": docstring,
+                    "signature": f"{name}{signature}"
+                })
+        
+        return sorted(methods, key=lambda x: x["name"])
+
     def _make_request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict:
         """Make HTTP request to Hue Bridge."""
         url = f"{self.base_url}/{endpoint}"

@@ -207,7 +207,7 @@ def tool_caller(tools: List, transcript: List[str]):
         base_url="https://openrouter.ai/api/v1"
     )
     
-    prompt = f'''f<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+    prompt = f'''<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
 Cutting Knowledge Date: December 2023
 Today Date: Nov 2 2024
@@ -283,3 +283,4 @@ Given the following list of tools and a transcript of the conversation so far, y
 
     print({"event": "Extracted_tool_calls", "count": len(tool_calls)})
     return tool_calls
+

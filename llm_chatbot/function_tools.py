@@ -15,9 +15,7 @@ from secret_keys import (
     SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET,
     HUE_USER,
-    HUE_CLIENT_SECRET,
-    HUE_CLIENT_ID,
-    HUE_BRIDGE_IP
+    HUE_BRIDGE_IP,
 )
 from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
@@ -27,7 +25,8 @@ import numpy as np
 from PIL import Image
 import os
 from typing import Union, Dict
-
+import openai
+from secret_keys import OPENROUTER_API_KEY
 
 @tool
 def open_image_file(filepath: str):
@@ -455,6 +454,32 @@ def get_tool_list_prompt(tools):
     return "\n\n".join(tool_desc_list)
 
 
+def get_tools_overview(available_method_sets):
+    tool_overview_prompt = "".join(["<tool_method_set>" + "\n".join(tool.get_available_methods()) + "</tool_method_set>" for tool in available_method_sets])
+    prompt = f'''<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are to analyze the set of methods, given below, that are a components/facets of the same tool/functionality. The main task at hand is to output a detailed overview of the overall tool and the functionality it offers with all the methods it has in the format specified below. The summary should be concise yet detailed. Refer to the tool method set to properly understand and relay their functionality and the capability of the tool as a whole better in your description. You are to only output one tool: description capturing the whole set of methods and their capabilities.
+
+## Output Format
+Your output should always be valid JSON in this format:
+{
+    "tool_name": "<name of tool>",
+    "description": "<detailed yet concise description outlining/highlighting the tools functions>"
+}<|eot_id|><|start_header_id|>user<|end_header_id|>Below is the tool method sets for a single tool:\n{tool_overview_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>{{"tool_name":"'''
+
+    openai_client = openai.OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1"
+    )
+    prompt_completion = openai_client.completions.create(
+        model="meta-llama/llama-3.1-70b-instruct",
+        prompt=prompt,
+        max_tokens=4096,
+        temperature=0.1
+    )
+    tools_overview = '''{{"tool_name":"''' + prompt_completion.choices[0].text
+    print(tools_overview)
+    return tools_overview
+
 def get_tools():
     interpreter = UVPythonShellManager()
     session = interpreter.create_session()
@@ -465,6 +490,12 @@ def get_tools():
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
 
     tool_dict = {}
+    tool_dict["overview"] = get_tools_overview([
+        interpreter.get_available_methods(),
+        spotify.get_available_methods(),
+        hue_tool.get_available_methods()
+    ])
+
     functions = [
         get_current_weather,
         web_search,

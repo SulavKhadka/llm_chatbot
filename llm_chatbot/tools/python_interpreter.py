@@ -6,7 +6,8 @@ import json
 import logging
 import time
 import select
-from typing import Dict, Any, Optional
+import inspect
+from typing import Dict, Any, List, Optional
 
 from secret_keys import POSTGRES_DB_PASSWORD
 
@@ -163,6 +164,34 @@ class UVPythonShellManager:
         self.python_version = "3.11"
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         self.curr_session_id = None
+
+    def get_available_methods(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of all public methods in the class along with their docstrings.
+        
+        Returns:
+            List of dictionaries containing method names and their documentation.
+            Each dictionary has:
+                - name: Method name
+                - docstring: Method documentation
+                - signature: Method signature
+        """
+        methods = []
+        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
+            # Skip private methods (those starting with _)
+            if not name.startswith('_'):
+                # Get the method's signature
+                signature = str(inspect.signature(method))
+                # Get the method's docstring, clean it up and handle None case
+                docstring = inspect.getdoc(method) or "No documentation available"
+                
+                methods.append({
+                    "name": name,
+                    "docstring": docstring,
+                    "signature": f"{name}{signature}"
+                })
+        
+        return sorted(methods, key=lambda x: x["name"])
 
     def create_session(self) -> Dict[str, str]:
         """

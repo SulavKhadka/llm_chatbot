@@ -22,7 +22,7 @@ from outlines.models.openai import OpenAIConfig
 from llm_chatbot import function_tools, utils
 from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY
+from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY, USER_INFO
 from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, RESPONSE_CFG_GRAMMAR
 
 # Configure logfire
@@ -613,14 +613,20 @@ class ChatBot:
         self.conn.close()
 
     def execute(self, tool_suggestions):
-        self.system['content'] = re.sub(pattern='## Current Realtime Info\n.*\n\n## Tool Suggestions\n.*\n\n## End\n', repl='', string=self.system['content'])
+        self.system['content'] = re.sub(pattern='\n## Current Realtime Info\n.*\n\n## Available Tools Overview\n.*\n\n## Tool Suggestions\n.*\n\n## User Information\n.*\n\n## End\n', repl='', string=self.system['content'])
         current_info = f'''
 ## Current Realtime Info
-- Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
-- User: {self.user_id}
+Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
+
+## Available Tools Overview
+{self.functions.get('overview', 'Overview not found.')}
 
 ## Tool Suggestions
 {tool_suggestions}
+
+## User Information
+Username: {USER_INFO['username']}
+HomeAddress: {USER_INFO['home_address']}
 
 ## End
 '''
