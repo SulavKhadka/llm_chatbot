@@ -89,6 +89,8 @@ SYSTEM DATA:
 Can the bot handle this scenario?
 - for the next hour, every 5 mins, get the current weather and wind conditions and then alert me only if the wind is blowing above 10mph and temp is below 50F.
     - this needs to track and have a non user trigger to the bot loop, as well as an option to not respond until a crietria is met.
+- If the tool output or user input is a very large amount of tokens(5K - 64k) then how do you handle it?
+
 
 Voice Mode:
 - If asked for code or something like that, we still output it but for voice output filter that out so it doesnt go over TTS but tells user to refer to a screen(chat window) for the code.
@@ -144,25 +146,83 @@ audio processing tool: process audio in general by having a tool which will give
     - yt-dlp and ffmpeg tool to the assistant so they can flexibly take care of any online audio/video kind of issues
 
 
+queries i want it to succeed at:
+- Im feeling chinese what should I eat?/what can i order from doordash?
+- are there any qfc deals rn?
+- looking for a hike close to the city like mabye an hour max from here. you got some suggestions?
+- what is the current car rental rate if i get a suv from the seatac airport?
+- how do i get to x place?(texts me a google maps link of the route)
 
 
+how can we save a topic to discuss later and have that be possible when they are ready to dissucss it?
+    - feels related to previous conversation context RAG tool
+    - maybe the RAG tool needs to be able to pull more or less depending on the detail to which we want to remember
+    - top_k controls this and agent is responsible for asking for more or less
 
 
+function docs for agent to reference:
+- Tool and Capabilites Overview Information: tool name(class level not method level) with a brief description informing what the functionality the tool offers in a succinct manner(built from analyzing every public method the user can call)
+- 
 
+ability to mock the tools and their responses for llm generation testing and data collection
+- every tool will describe their datamodels they use to return back data.
+- whenever a new tool gets added we can make training data specific to the tool by dynamically constructing conversations and being able to generate valid responses to inject as tool call responses based onf the data models each tool defines
+- combine all the tool examples for the current arsenal and train a lora to use and update as new tools gets added. (overfitting is kinda what we want for reliability)
+
+- Need a place for things like temporary file downloads and other operational things to happen isolated:
+    - files should be downloaded to specific places
+    - cmd line should always specify dir for where this should happen
+
+example_types:
+- result persistence: agent saves important tool outputs to refer back to later in conversation
+- failure pattern recognition - agent learns which tool approaches tend to fail and avoids them
+
+
+brightdata api:
+- Scraper API: $1 per 1000 queries
+- SERP API: $3 per 1000 queries 
+
+$15 for SERP -> 5000 queries
+$10 for Scraper -> 10K urls
+$10 for Inference -> ~8.2M-ish tokens(assuming avg across models at $1.2/M toks)
+$15 flex spend
+
+Brave search api:
+- SERP API: 2000 queries free a month
+
+
+Agent resources per month:
+- SERP API: 7k queries
+- Scraper 10k urls
+- ~8M tokens of 
+
+
+Research Tool
+- SERP api for web search
+- Scraper api for webpage content
+- Wikipedia tool not using web search quota
+- Arxiv tool not using web search quota
+- data analysis tool using python
+- Wolfram alpha
 
 ## THINGS TO DO ([ ] Not Started | [-] InProgress | [x] Completed): 
 
 [-] maps tool
 [-] philips hue tool
-[ ] Translate a hf function calling dataset to our tool_caller format
-[ ] constrained generation where only current available tool names are possible, same with args
-[ ] generate general conversation data from conversations so far to finetune the assistant
-[ ] careful review of chatbot logging and db entry as the db recreates the chats and generates training data
+[x] provide a tool call overview summarizer that takes in all the methods per tool and summarizes their doc as a small text description of the over all tool and its function.
+[ ] be able to call the tool_caller asking for more functions if it seems the initial bag of tools given didnt have what you needed
 [ ] implement VLM querying and test screenshot tool
-[ ] idea exploration workflows to encourage assistant to act that way for these scenarios, maybe even trigger it with a phrase "lets get into a rabbit hole" "lets do some research discussion"
-[ ] use redis or something active to keep session state so it can be updated by from different modalities and the only copy of the state will get updated ensuring consistency when switching conversation between different devices/modalities
-[ ] add modality specific conversation reply generation commands: mentioned above with voice mode and text mode
-[ ] yt-dlp tool
-[ ] inject user data and system data into system prompt for assistant awareness and behaviour catering
+[-] yt-dlp tool
+[x] inject user data and system data into system prompt for assistant awareness and behaviour catering
 [ ] inject time infront of every turn to give assistant a time component to the interactions/conversation
+
+[-] Translate a hf function calling dataset to our tool_caller format
+[ ] Generate fail cases for tool calls and show recovery by diagnosing the error and successfully recovering to get the results
+[ ] constrained generation where only current available tool names are possible, same with args
+[ ] use redis or something active to keep session state so it can be updated by from different modalities and the only copy of the state will get updated ensuring consistency when switching conversation between different devices/modalities
+
+[ ] generate general conversation data from conversations so far to finetune the assistant
+[-] careful review of chatbot logging and db entry as the db recreates the chats and generates training data
+[ ] idea exploration workflows to encourage assistant to act that way for these scenarios, maybe even trigger it with a phrase "lets get into a rabbit hole" "lets do some research discussion"
+[ ] add modality specific conversation reply generation commands: mentioned above with voice mode and text mode
 
