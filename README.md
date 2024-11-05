@@ -37,15 +37,16 @@ flowchart LR
 
 Stack is: 
 - FastAPI(backend server)
+- Postgres(DB)
+- logfire(logging)
 - openai(api client)
 - openrouter(inference)
 - outlines(structured generation)
-- Postgres(DB)
-- logfire(logging)
 
 
-Current Arch
+Current Agent Chatbot Flow:
 ---
+This is the main agent file `chatbot.py` illustrated to show the main agent loop. Everything else is supporting/utils to be used by this agent loop. (This is close to a final of V1 agent loop, just needs way to support background tasks)
 ```mermaid
 sequenceDiagram
     participant Client
