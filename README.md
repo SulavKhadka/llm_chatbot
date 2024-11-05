@@ -1,8 +1,47 @@
 Intro
 ---
-Using this as a practice for making agents and deploying them on discord as testing grounds.
+Using this as a practice for making agents and deploying them as a siri like assistant as testing grounds for llm workflows.
 
-Right now the backend is a vllm openai inference server. SGlang has been tested but they dont have tool support yet so sticking with vllm
+```mermaid
+flowchart LR
+    subgraph Clients
+        direction TB
+        WebUI["Web Chat Interface"]
+        TTS["TTS Bot"]
+        PWA["PWA Mobile Chat"]
+    end
+
+    API["API Server"] 
+    
+    subgraph Core
+        direction TB
+        Chatbot["Chatbot Engine"]
+        Tools["Tool Suite"]
+    end
+    
+    subgraph DB["PostgreSQL DB"]
+        direction TB
+        Tables["Conversation Tables"]
+        Vector["pgvector Table"]
+    end
+
+    WebUI & TTS & PWA --> API
+    API <--> Chatbot
+    Chatbot <--> Tools
+    Chatbot <--> Tables
+    Chatbot <--> Vector
+
+    %% Remove all styling to keep it minimal
+    linkStyle default stroke:#333
+```
+
+Stack is: 
+- FastAPI(backend server)
+- openai(api client)
+- openrouter(inference)
+- outlines(structured generation)
+- Postgres(DB)
+- logfire(logging)
 
 
 Current Arch
