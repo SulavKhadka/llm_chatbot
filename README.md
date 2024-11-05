@@ -5,6 +5,104 @@ Using this as a practice for making agents and deploying them on discord as test
 Right now the backend is a vllm openai inference server. SGlang has been tested but they dont have tool support yet so sticking with vllm
 
 
+Current Arch
+---
+```mermaid
+sequenceDiagram
+    participant Client
+    participant ChatBot
+    participant Database
+    participant TokenizerService
+    participant LLMProvider
+    participant ToolExecutor
+    participant VectorSearch
+
+    Note over ChatBot: Initialize System
+    Client->>ChatBot: Create ChatBot Instance
+    ChatBot->>Database: Initialize Connection
+    ChatBot->>TokenizerService: Load Tokenizer Model
+    ChatBot->>VectorSearch: Initialize RAG System
+
+    alt New Session
+        ChatBot->>Database: Create New Session
+        ChatBot->>Database: Store System Message
+    else Existing Session
+        ChatBot->>Database: Load Session Data
+        ChatBot->>Database: Load Message History
+    end
+
+    Note over ChatBot: Message Processing Flow
+    Client->>ChatBot: Send Message
+    activate ChatBot
+    ChatBot->>Database: Store User Message
+    ChatBot->>TokenizerService: Count Message Tokens
+
+    Note over ChatBot: Memory Management
+    ChatBot->>ChatBot: Check Token Limits
+    opt If Total Tokens > Max Limit
+        ChatBot->>ChatBot: Rolling Memory Purge
+        ChatBot->>Database: Update Purged Messages
+    end
+
+    Note over ChatBot: Tool Processing
+    ChatBot->>ToolExecutor: Get Tool Suggestions
+    
+    Note over ChatBot: LLM Interaction
+    ChatBot->>LLMProvider: Send Conversation Context
+    LLMProvider-->>ChatBot: Return Response
+    
+    ChatBot->>ChatBot: Parse Response
+    
+    alt Tool Call Required
+        ChatBot->>ToolExecutor: Execute Function Call
+        ToolExecutor-->>ChatBot: Return Tool Results
+        ChatBot->>Database: Log Function Call
+        ChatBot->>ChatBot: Process Tool Results
+    end
+
+    ChatBot->>Database: Store Assistant Response
+    opt If Configured
+        ChatBot->>Database: Store Chat Notes
+    end
+    
+    ChatBot-->>Client: Return Final Response
+    deactivate ChatBot
+
+    Note over ChatBot: Session Cleanup
+    Client->>ChatBot: End Session
+    ChatBot->>Database: Store Final Session Notes
+    ChatBot->>Database: Close Connection
+```
+
+## Diagram Overview
+
+The sequence diagram above illustrates the main components and flows of the chatbot system:
+
+1. **Initialization Phase**
+   - System initialization and connection setup
+   - Session handling (new/existing)
+
+2. **Message Processing Flow**
+   - User message handling
+   - Token management
+   - Memory management with rolling purge
+
+3. **Core Processing Loop**
+   - Tool suggestion gathering
+   - LLM interaction
+   - Tool execution pathway
+   - Database logging
+
+4. **Response Handling**
+   - Response type processing
+   - Tool call execution
+   - Response storage
+
+5. **Session Management**
+   - Session cleanup
+   - Final notes storage
+   - Connection cleanup
+
 Notes
 ---
 - I see that for time and time conversions its not able to calculate given that it has the correct time given to it at all times. Need some fn calling implementations.
