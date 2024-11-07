@@ -36,8 +36,8 @@ things needed:
 
 
 BUGS:
-[ ] sys message gets pasted twice
-[ ] if the system fails to response and we send another message, two user messages get added back to back, Need to add try catch and make the assistant response a internal error
+[x] sys message gets pasted twice
+[x] if the system fails to response and we send another message, two user messages get added back to back, Need to add try catch and make the assistant response a internal error
 [ ] when loading a session state back after X time. the same openai_client might not be serving the backend(or shouldnt be required to) so instead of failing we should be able to switch over to the same model on a different provider or in the case of the model not being available across providers, continue on with one that is available.
 [ ] If i am talking from tts bot to it(which means a session is open for that and has been loaded to the chatbot class instance) and i switch to the same session in chatbot window and add a message continuing the conversation there, how will the tts_bot know there have been state updates to the db and that it needs to sync again?
     - I think we need to be relying on db always even in a instatiated chatbot instance
@@ -71,9 +71,26 @@ metadata per message: this granularity is required to give the agent context of 
     INPUT_MODALITY (for user inputs)
 
 
+USER DATA:
+    - username:
+    - location:
+    - preferences: ["<preference>",] # list of things that user prefers as reflected in previous conversations; how to keep it updated?
+    - notes: for agents reference on how to interact and otehr personal details to use in interaction
+    - integrations: ["gmail", "spotify", "hue", "google calendar", "imessage"]
+
+SYSTEM DATA:
+    - status: 
+    - tools_status: [{"tool_name": "status"},]
+    - tool_caller_health:
+    - storage_health:
+    - llm_provider_health:
+
+
 Can the bot handle this scenario?
 - for the next hour, every 5 mins, get the current weather and wind conditions and then alert me only if the wind is blowing above 10mph and temp is below 50F.
     - this needs to track and have a non user trigger to the bot loop, as well as an option to not respond until a crietria is met.
+- If the tool output or user input is a very large amount of tokens(5K - 64k) then how do you handle it?
+
 
 Voice Mode:
 - If asked for code or something like that, we still output it but for voice output filter that out so it doesnt go over TTS but tells user to refer to a screen(chat window) for the code.
@@ -95,5 +112,156 @@ for a "body" since i have a RAE driving robot i was thinking of how to have it e
     - ouputs: some set of direction and speed at so many times a second frequency  
 
 needs to be able to use homeassistant, eiter through api or VLM based application browsing
-maps tool
-philips hue tool
+
+i would use this kind of assistant for exploring ideas and things ive heard or learned. so it needs to have the tool set capability and behaviour pattern to do that
+    - i think this will require handholding it through a bunch of the research to edit and make a dataset to finetune on top of
+    - initial setup doesnt seem too bad though.
+    - it needs to be able to rabbit hole into and research deeper for a topic
+    - pull live sources data
+
+research tools:
+- wikipedia
+- wolfram alpha
+- SERP API ($3/1000 api calls)
+- web browser -> google search
+- web browser -> reddit
+
+exploring apple health integration:
+    - encourage towards goals
+    - analyze data for insights to answer user query
+
+screen time tool info from phone.
+calculator tool using python repl.
+
+another scenario: i want to be able to say do you see whats on my screen, have it take a screenshot of my screen once it knows the device I am are referring to, then be able to ask questions about it. maybe even a keyboard input tool to have it type the command out for me given my query about it
+
+computer control tools:
+- screenshot of displays or application specific
+- keyboard and mouse input
+- application selection: alt+tab kinda thing
+
+audio processing tool: process audio in general by having a tool which will give it a stt transcribed text for any given audio source.
+    - server_api gets a route added where any client can forward sound to for chatbot reply (it'll use whisper to transcribe)
+    - if research/query requires to watch youtube videos then tool to convert youtube videos into stt transcript
+    - yt-dlp and ffmpeg tool to the assistant so they can flexibly take care of any online audio/video kind of issues
+
+
+queries i want it to succeed at:
+- Im feeling chinese what should I eat?/what can i order from doordash?
+- are there any qfc deals rn?
+- looking for a hike close to the city like mabye an hour max from here. you got some suggestions?
+- what is the current car rental rate if i get a suv from the seatac airport?
+- how do i get to x place?(texts me a google maps link of the route)
+
+
+how can we save a topic to discuss later and have that be possible when they are ready to dissucss it?
+    - feels related to previous conversation context RAG tool
+    - maybe the RAG tool needs to be able to pull more or less depending on the detail to which we want to remember
+    - top_k controls this and agent is responsible for asking for more or less
+
+
+function docs for agent to reference:
+- Tool and Capabilites Overview Information: tool name(class level not method level) with a brief description informing what the functionality the tool offers in a succinct manner(built from analyzing every public method the user can call)
+- 
+
+ability to mock the tools and their responses for llm generation testing and data collection
+- every tool will describe their datamodels they use to return back data.
+- whenever a new tool gets added we can make training data specific to the tool by dynamically constructing conversations and being able to generate valid responses to inject as tool call responses based onf the data models each tool defines
+- combine all the tool examples for the current arsenal and train a lora to use and update as new tools gets added. (overfitting is kinda what we want for reliability)
+
+- Need a place for things like temporary file downloads and other operational things to happen isolated:
+    - files should be downloaded to specific places
+    - cmd line should always specify dir for where this should happen
+
+example_types:
+- result persistence: agent saves important tool outputs to refer back to later in conversation
+- failure pattern recognition - agent learns which tool approaches tend to fail and avoids them
+
+
+brightdata api:
+- Scraper API: $1 per 1000 queries
+- SERP API: $3 per 1000 queries 
+
+$15 for SERP -> 5000 queries
+$10 for Scraper -> 10K urls
+$10 for Inference -> ~8.2M-ish tokens(assuming avg across models at $1.2/M toks)
+$15 flex spend
+
+Brave search api:
+- SERP API: 2000 queries free a month
+
+
+Agent resources per month:
+- SERP API: 7k queries
+- Scraper 10k urls
+- ~8M tokens of inference tokens
+
+
+Research Tool
+- SERP api for web search
+- Scraper api for webpage content
+- Wikipedia tool not using web search quota
+- Arxiv tool not using web search quota
+- data analysis tool using python
+- Wolfram alpha
+
+
+if the chatbot runs on rasp-pi and is to be whole house integrated through different clients like:
+- terminal
+- code editor
+- chrome extension
+- voice/tts
+- chat window
+it needs to know what the input source is and respond accordingly and also attribute it to appropripate sessions
+
+since we do "infinite context" we need to be able to ignore the previous context for the current conversation as needed or asked by the user.
+
+Voice vs Text Mode needs to be injected asap
+tool suggestions need to be tested for givign the filtered amount.
+
+Notifier Service:
+- notifier.notify(event_time, message) -> POST /bot/message {"client_type":"bot", "message": message}
+- runs as a separate process as a cron scheduler for jobs
+- server_api should handle a client_type="notification" accordingly and mix it in with the current conversation
+    - the different ways of doing this needs to be thought out
+
+- schedule a reminder "to wash dishes" in 5 mins:
+    - notifier.notify(datetime.now()+5, "to wash dishes")
+- put a timer on for 5 mins:
+    - notifier.notify(datetime.now()+5, "5 min times is over.")
+- compute the result of this long running program and give it back to me:
+    - lambda x, y: result=fn(); notifier.notify(event_time=x, message=result)
+
+
+background_code_runners:
+- who is using this: the bot to run code or scripts and get the result (long running task, sub-agents)
+- at the end it would trigger a notifier.notify() to give back the result
+
+
+
+
+
+----------------------------------------------------------------------
+** THINGS TO DO ** ([ ] Not Started | [-] InProgress | [x] Completed): 
+----------------------------------------------------------------------
+
+[-] maps tool
+[-] philips hue tool
+[x] provide a tool call overview summarizer that takes in all the methods per tool and summarizes their doc as a small text description of the over all tool and its function.
+[ ] be able to call the tool_caller asking for more functions if it seems the initial bag of tools given didnt have what you needed
+[ ] implement VLM querying and test screenshot tool
+[-] yt-dlp tool
+[x] inject user data and system data into system prompt for assistant awareness and behaviour catering
+[ ] inject time infront of every turn to give assistant a time component to the interactions/conversation
+
+[-] Translate a hf function calling dataset to our tool_caller format
+[ ] Generate fail cases for tool calls and show recovery by diagnosing the error and successfully recovering to get the results
+[ ] constrained generation where only current available tool names are possible, same with args
+[ ] use redis or something active to keep session state so it can be updated by from different modalities and the only copy of the state will get updated ensuring consistency when switching conversation between different devices/modalities
+
+[-] make a deployable folder into a raspi or docker container.
+[ ] generate general conversation data from conversations so far to finetune the assistant
+[-] careful review of chatbot logging and db entry as the db recreates the chats and generates training data
+[ ] idea exploration workflows to encourage assistant to act that way for these scenarios, maybe even trigger it with a phrase "lets get into a rabbit hole" "lets do some research discussion"
+[ ] add modality specific conversation reply generation commands: mentioned above with voice mode and text mode
+

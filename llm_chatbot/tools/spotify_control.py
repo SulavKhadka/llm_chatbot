@@ -6,6 +6,7 @@ import webbrowser
 from secret_keys import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
 from functools import wraps
 import os
+import inspect
 
 class SpotifyTool:
     """Tool for controlling Spotify playback and getting information."""
@@ -160,16 +161,33 @@ class SpotifyTool:
         except Exception as e:
             return None
 
-    def clear_auth_cache(self):
-        """Clear the stored authentication cache."""
-        try:
-            if os.path.exists(self.cache_path):
-                os.remove(self.cache_path)
-                print("Authentication cache cleared successfully")
-            else:
-                print("No authentication cache found")
-        except Exception as e:
-            print(f"Error clearing cache: {str(e)}")
+    def get_available_methods(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of all public methods in the class along with their docstrings.
+        
+        Returns:
+            List of dictionaries containing method names and their documentation.
+            Each dictionary has:
+                - name: Method name
+                - docstring: Method documentation
+                - signature: Method signature
+        """
+        methods = []
+        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
+            # Skip private methods (those starting with _)
+            if not name.startswith('_'):
+                # Get the method's signature
+                signature = str(inspect.signature(method))
+                # Get the method's docstring, clean it up and handle None case
+                docstring = inspect.getdoc(method) or "No documentation available"
+                
+                methods.append({
+                    "name": name,
+                    "docstring": docstring,
+                    "signature": f"{name}{signature}"
+                })
+        
+        return sorted(methods, key=lambda x: x["name"])
 
     @_ensure_spotify_connected
     @_require_active_device
