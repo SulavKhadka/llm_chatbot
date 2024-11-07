@@ -30,12 +30,11 @@ jobs:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
         with:
           script: |
-            const { Configuration, OpenAIApi } = require("openai");
-            const configuration = new Configuration({
+            const { OpenAI } = require("openai");
+            const openai = new OpenAI({
               baseURL: process.env.INFERENCE_API_URL
               apiKey: process.env.INFERENCE_API_KEY,
             });
-            const openai = new OpenAIApi(configuration);
 
             const diff = process.env.DIFF;
             
