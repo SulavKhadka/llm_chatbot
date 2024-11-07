@@ -19,7 +19,7 @@ db_config = {
     "dbname": "chatbot_db",
     "user": "chatbot_user",
     "password": POSTGRES_DB_PASSWORD,
-    "host": "localhost",
+    "host": "forge",
     "port": "5432",
 }
 

@@ -212,7 +212,7 @@ class UVPythonShellManager:
             self.execute_command(process, f"export POSTGRES_PASSWORD='{POSTGRES_DB_PASSWORD}'", timeout=30)
             self.execute_command(process, "export APP_DB_USER='chatbot_user'", timeout=30)
             self.execute_command(process, "export APP_DB_NAME='chatbot_db'", timeout=30)
-            self.execute_command(process, f"export APP_DB_PASSWORD='{POSTGRES_DB_PASSWORD}appify'", timeout=30)
+            self.execute_command(process, f"export APP_DB_PASSWORD='app_{POSTGRES_DB_PASSWORD}'", timeout=30)
 
             logger.info("ensuring postgresql is installed")
             postgres_setup_output = self.execute_command(process, f"/bin/bash {session_dir}/install_postgres.sh", timeout=30)
