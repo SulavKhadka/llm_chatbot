@@ -33,15 +33,16 @@ jobs:
           INFERENCE_API_KEY: ${{ secrets.INFERENCE_API_KEY }}
         with:
           script: |
-            const { OpenAI } = require("openai");
-            const client = new OpenAI({
-              apiKey: process.env.INFERENCE_API_KEY,
-              baseURL: process.env.INFERENCE_API_URL
+            const { Configuration, OpenAIApi } = require("openai");
+            const configuration = new Configuration({
+                apiKey: process.env.INFERENCE_API_KEY,
+                basePath: process.env.INFERENCE_API_URL
             });
+            const client = new OpenAIApi(configuration);
 
             const diff = process.env.DIFF;
             
-            const completion = await client.chat.completions.create({
+            const completion = await client.createChatCompletion({
               model: "meta-llama/llama-3.1-70b-instruct",
               messages: [{
                 role: "system",
