@@ -52,6 +52,10 @@ jobs:
               }],
             });
 
+            console.log(completion);
+            console.log("------------")
+            console.log(completion.data);
+            
             const summary = completion.data.choices[0].message.content;
 
             await github.rest.issues.createComment({
