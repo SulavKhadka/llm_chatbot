@@ -54,8 +54,10 @@ jobs:
             });
 
             console.log(completion);
-
-            const summary = completion.choices[0].message.content;
+            console.log("------------")
+            console.log(completion.data);
+            
+            const summary = completion.data.choices[0].message.content;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
