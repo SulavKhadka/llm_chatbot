@@ -41,7 +41,7 @@ jobs:
 
             const diff = process.env.DIFF;
             
-            const completion = await openai.createChatCompletion({
+            const completion = await client.chat.completions.create({
               model: "meta-llama/llama-3.1-70b-instruct",
               messages: [{
                 role: "system",
