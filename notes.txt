@@ -194,7 +194,7 @@ Brave search api:
 Agent resources per month:
 - SERP API: 7k queries
 - Scraper 10k urls
-- ~8M tokens of 
+- ~8M tokens of inference tokens
 
 
 Research Tool
@@ -205,7 +205,45 @@ Research Tool
 - data analysis tool using python
 - Wolfram alpha
 
-## THINGS TO DO ([ ] Not Started | [-] InProgress | [x] Completed): 
+
+if the chatbot runs on rasp-pi and is to be whole house integrated through different clients like:
+- terminal
+- code editor
+- chrome extension
+- voice/tts
+- chat window
+it needs to know what the input source is and respond accordingly and also attribute it to appropripate sessions
+
+since we do "infinite context" we need to be able to ignore the previous context for the current conversation as needed or asked by the user.
+
+Voice vs Text Mode needs to be injected asap
+tool suggestions need to be tested for givign the filtered amount.
+
+Notifier Service:
+- notifier.notify(event_time, message) -> POST /bot/message {"client_type":"bot", "message": message}
+- runs as a separate process as a cron scheduler for jobs
+- server_api should handle a client_type="notification" accordingly and mix it in with the current conversation
+    - the different ways of doing this needs to be thought out
+
+- schedule a reminder "to wash dishes" in 5 mins:
+    - notifier.notify(datetime.now()+5, "to wash dishes")
+- put a timer on for 5 mins:
+    - notifier.notify(datetime.now()+5, "5 min times is over.")
+- compute the result of this long running program and give it back to me:
+    - lambda x, y: result=fn(); notifier.notify(event_time=x, message=result)
+
+
+background_code_runners:
+- who is using this: the bot to run code or scripts and get the result (long running task, sub-agents)
+- at the end it would trigger a notifier.notify() to give back the result
+
+
+
+
+
+----------------------------------------------------------------------
+** THINGS TO DO ** ([ ] Not Started | [-] InProgress | [x] Completed): 
+----------------------------------------------------------------------
 
 [-] maps tool
 [-] philips hue tool
@@ -221,6 +259,7 @@ Research Tool
 [ ] constrained generation where only current available tool names are possible, same with args
 [ ] use redis or something active to keep session state so it can be updated by from different modalities and the only copy of the state will get updated ensuring consistency when switching conversation between different devices/modalities
 
+[-] make a deployable folder into a raspi or docker container.
 [ ] generate general conversation data from conversations so far to finetune the assistant
 [-] careful review of chatbot logging and db entry as the db recreates the chats and generates training data
 [ ] idea exploration workflows to encourage assistant to act that way for these scenarios, maybe even trigger it with a phrase "lets get into a rabbit hole" "lets do some research discussion"
