@@ -24,6 +24,7 @@ from llm_chatbot.tools.philips_hue_tool import PhilipsHueTool
 import numpy as np
 from PIL import Image
 import os
+import json
 from typing import Union, Dict
 import openai
 from secret_keys import OPENROUTER_API_KEY
@@ -455,16 +456,16 @@ def get_tool_list_prompt(tools):
 
 
 def get_tools_overview(available_method_sets):
-    tool_overview_prompt = "".join(["<tool_method_set>" + "\n".join(tool.get_available_methods()) + "</tool_method_set>" for tool in available_method_sets])
+    tool_overview_prompt = "".join(["<tool_method_set>" + json.dumps(tool.get_available_methods()) + "</tool_method_set>" for tool in available_method_sets])
     prompt = f'''<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are to analyze the set of methods, given below, that are a components/facets of the same tool/functionality. The main task at hand is to output a detailed overview of the overall tool and the functionality it offers with all the methods it has in the format specified below. The summary should be concise yet detailed. Refer to the tool method set to properly understand and relay their functionality and the capability of the tool as a whole better in your description. You are to only output one tool: description capturing the whole set of methods and their capabilities.
 
 ## Output Format
 Your output should always be valid JSON in this format:
-{
+{{
     "tool_name": "<name of tool>",
     "description": "<detailed yet concise description outlining/highlighting the tools functions>"
-}<|eot_id|><|start_header_id|>user<|end_header_id|>Below is the tool method sets for a single tool:\n{tool_overview_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>{{"tool_name":"'''
+}}<|eot_id|><|start_header_id|>user<|end_header_id|>Below is the tool method sets for a single tool:\n{tool_overview_prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>{{"tool_name":"'''
 
     openai_client = openai.OpenAI(
         api_key=OPENROUTER_API_KEY,
@@ -491,9 +492,9 @@ def get_tools():
 
     tool_dict = {}
     tool_dict["overview"] = get_tools_overview([
-        interpreter.get_available_methods(),
-        spotify.get_available_methods(),
-        hue_tool.get_available_methods()
+        interpreter,
+        spotify,
+        hue_tool
     ])
 
     functions = [
