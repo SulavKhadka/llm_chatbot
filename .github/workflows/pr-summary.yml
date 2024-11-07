@@ -34,7 +34,7 @@ jobs:
         with:
           script: |
             const { OpenAI } = require("openai");
-            const openai = new OpenAI({
+            const client = new OpenAI({
               apiKey: process.env.INFERENCE_API_KEY,
               baseURL: process.env.INFERENCE_API_URL
             });
