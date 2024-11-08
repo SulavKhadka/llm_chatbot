@@ -77,6 +77,14 @@ class ChatBot:
             use_binary=False
         )
 
+        self.tool_rag = VectorSearch(
+            db_config=db_config,
+            dimensions=256,
+            use_binary=False,
+            table_name=f"tool_rag_{chat_id}"
+        )
+        self.tool_rag.bulk_insert([(f"{tool_name} : {self.functions[tool_name]['schema']['function']['description']}", None) for tool_name in self.functions.keys() if tool_name != 'overview'])
+
         global logger
         self.user_id = user_id
         self.chat_id = chat_id
@@ -252,8 +260,8 @@ class ChatBot:
         recursion_counter = 0
         while self_recurse and recursion_counter < self.max_recurse_depth:
 
-            transcript = [m for m in self.messages if m.get('role', 'system') != 'system']
-            tool_suggestions = utils.tool_caller(self.functions, transcript)
+            transcript = [m for m in self.messages[-2:] if m.get('role', 'system') != 'system']
+            tool_suggestions = self.tool_rag.query(transcript, top_k=5)
             logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
             
             self.rolling_memory()

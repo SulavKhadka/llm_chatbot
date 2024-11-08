@@ -1,10 +1,11 @@
+import json
 from typing import List, Dict, Any, Tuple
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.quantization import quantize_embeddings
 import psycopg2
 from psycopg2.extras import execute_values, Json
-import json
+import torch
 import os
 
 class VectorSearch:
@@ -42,6 +43,7 @@ class VectorSearch:
             with conn.cursor() as cur:
                 # Enable pgvector extension
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
                 
                 # Create table for storing embeddings and metadata
                 cur.execute(f"""
@@ -50,10 +52,19 @@ class VectorSearch:
                         content TEXT,
                         embedding vector(%s),
                         metadata JSONB,
-                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        content_tsv tsvector
                     );
                 """, (self.dimensions,))
                 
+               
+                # Create GIN index on content_tsv for efficient BM25 search
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS {self.table_name}_content_tsv_idx
+                    ON {self.table_name} 
+                    USING GIN (content_tsv);
+                """)
+
                 # Create an index for faster similarity search
                 cur.execute(f"""
                     CREATE INDEX IF NOT EXISTS {self.table_name}_idx 
@@ -64,13 +75,15 @@ class VectorSearch:
                 
                 conn.commit()
 
-    def _encode_text(self, text: str) -> np.ndarray:
+    def _encode_text(self, text: str, embed_type: str="document") -> np.ndarray:
         """Encode text using the embedding model with MRL and optional BQL."""
+
         # Add query prompt for retrieval tasks
-        query_text = f"Represent this sentence for searching relevant passages: {text}"
-        
-        # Generate embedding
-        embedding = self.model.encode(query_text, prompt_name="query")
+        if embed_type == "query":
+            text = f"Represent this sentence for searching relevant passages: {text}"
+            embedding = self.model.encode(text, prompt_name="query", show_progress_bar=False)
+        else:
+            embedding = self.model.encode(text, show_progress_bar=False)
         
         # Apply binary quantization if enabled
         if self.use_binary:
@@ -92,18 +105,42 @@ class VectorSearch:
         
         with psycopg2.connect(self.conn_string) as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO embeddings (content, embedding, metadata)
-                    VALUES (%s, %s, %s)
+                query_sql = f"""
+                    INSERT INTO {self.table_name} (content, embedding, metadata, content_tsv)
+                    VALUES (%s, %s, %s, to_tsvector(%s))
                     RETURNING id;
-                """, (content, embedding.tolist(), Json(metadata) if metadata else Json({})))
+                """
+                cur.execute(query_sql, (content, embedding.tolist(), Json(metadata) if metadata else Json({}), content))
                 
                 record_id = cur.fetchone()[0]
                 conn.commit()
                 
         return record_id
 
-    def query(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    def query_bm25(self, query_text: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Search for documents using BM25 relevance scoring on full-text matches."""
+        with psycopg2.connect(self.conn_string) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    SELECT id, content, metadata, ts_rank(content_tsv, plainto_tsquery(%s)) AS rank
+                    FROM {self.table_name}
+                    WHERE content_tsv @@ plainto_tsquery(%s)
+                    ORDER BY rank DESC
+                    LIMIT %s;
+                """, (query_text, query_text, top_k))
+                
+                results = []
+                for id_, content, metadata, rank in cur.fetchall():
+                    results.append({
+                        "id": id_,
+                        "content": content,
+                        "metadata": metadata,
+                        "rank": float(rank)
+                    })
+                
+        return results
+
+    def query(self, query_text: str, top_k: int = 5, min_p: float = 0.4) -> List[Dict[str, Any]]:
         """Find the top_k most similar items to the query text.
         
         Args:
@@ -113,26 +150,31 @@ class VectorSearch:
         Returns:
             List of dicts containing id, content, metadata, and similarity score
         """
-        query_embedding = self._encode_text(query_text)
+        query_embedding = self._encode_text(query_text, embed_type="query")
         
         with psycopg2.connect(self.conn_string) as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT id, content, metadata, 
-                           1 - (embedding <=> %s::vector) as similarity
-                    FROM embeddings
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s;
-                """, (query_embedding.tolist(), query_embedding.tolist(), top_k))
+                cur.execute(f"""
+                    SELECT id, content, embedding, metadata 
+                    FROM {self.table_name};
+                """)
+                tool_rows = cur.fetchall()
+                query_to_tools_sim = torch.cosine_similarity(
+                    torch.Tensor(query_embedding),
+                    torch.Tensor([json.loads(i[2]) for i in tool_rows])
+                )
+                top_k_tools = query_to_tools_sim.topk(top_k)
                 
                 results = []
-                for id_, content, metadata, similarity in cur.fetchall():
-                    results.append({
-                        "id": id_,
-                        "content": content,
-                        "metadata": metadata,
-                        "similarity": float(similarity)
-                    })
+                for i in range(len(top_k_tools.indices)):
+                    if float(top_k_tools.values[i]) > min_p:
+                        tool_idx = top_k_tools.indices[i]
+                        results.append({
+                            "id": tool_rows[tool_idx][0],
+                            "content": tool_rows[tool_idx][1],
+                            "metadata": tool_rows[tool_idx][3],
+                            "similarity": float(top_k_tools.values[i])
+                        })
                 
         return results
 
@@ -152,23 +194,23 @@ class VectorSearch:
         with psycopg2.connect(self.conn_string) as conn:
             with conn.cursor() as cur:
                 # Prepare data for bulk insert
-                data = [(content, embedding, Json(metadata) if metadata else Json({})) 
+                data = [(content, embedding, Json(metadata) if metadata else Json({}), content) 
                        for (content, metadata), embedding 
                        in zip(items, embeddings)]
                 
+                query_sql = f"""
+                    INSERT INTO {self.table_name} (content, embedding, metadata, content_tsv)
+                    VALUES %s
+                    RETURNING id;
+                """
                 # Perform bulk insert
                 execute_values(
                     cur,
-                    """
-                    INSERT INTO embeddings (content, embedding, metadata)
-                    VALUES %s
-                    RETURNING id;
-                    """,
+                    query_sql,
                     data,
-                    template="(%s, %s, %s)"
+                    template="(%s, %s, %s, to_tsvector(%s))"
                 )
                 
                 ids = [row[0] for row in cur.fetchall()]
                 conn.commit()
-                
         return ids
