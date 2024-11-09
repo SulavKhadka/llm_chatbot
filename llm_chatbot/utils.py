@@ -32,8 +32,8 @@ def sanitize_inner_content(llm_output):
 
 def ensure_llm_response_format(llm_response_text, tools=None):
     openai_client = openai.OpenAI(
-            api_key=OPENROUTER_API_KEY,
-            base_url="https://openrouter.ai/api/v1"
+            api_key='hi',
+            base_url="http://localhost:8555/v1"
         )
     
     messages = [
@@ -169,7 +169,7 @@ Output:
 {tools}
 </tools>
 
-Remember, your task is to ensure every payload has proper XML structure and tag usage, correcting structure as needed while always perfectly copying the content of the responses. No action needed when XML is valid, evaluate carefully using the examples given above as a guide. Always keep the original content, intent, and wording of the assistant's response while correcting only the XML structure."""
+Remember, your task is to ensure every payload has proper XML structure and tag usage, correcting structure as needed while always perfectly copying the content of the responses. No action needed when XML is valid, evaluate carefully using the examples given above as a guide. Always keep the original content, intent, and wording of the assistant's response while correcting only the XML structure. A frequent correction is missing XML tag pairs opening or closing, just a tip."""
         },
         {
             "role": "user",
@@ -177,14 +177,25 @@ Remember, your task is to ensure every payload has proper XML structure and tag 
         }
     ]
 
-    chat_completion = openai_client.chat.completions.create(
-        model="meta-llama/llama-3.1-70b-instruct",
-        messages=messages,
-        max_tokens=4096,
-        temperature=0.1,
-        top_logprobs=20,
-        logprobs=True,
-    )
+    try:
+        chat_completion = openai_client.chat.completions.create(
+            model="Qwen/Qwen2.5-3B-Instruct",
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.4,
+            extra_body= {
+                "min_p": 0.2,
+                "top_k": 35,
+                "chat_template": "/home/bobby/Repos/llm_chatbot/models/Qwen2.5-3b-inst-chat-template.jinja",
+                "guided_grammar": RESPONSE_CFG_GRAMMAR
+            }
+        )
+    except Exception as e:
+        if e['code'] == 'model_not_available':
+            pass
+        else:
+            raise
+    print({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
 
     sanitized_llm_output = sanitize_inner_content(chat_completion.choices[0].message.content)
     xml_root_element = f"""<root>{sanitized_llm_output}</root>"""
@@ -193,17 +204,19 @@ Remember, your task is to ensure every payload has proper XML structure and tag 
     except ET.ParseError as e:
         return ET.fromstring("<root></root>")
 
-    corrected_response = root.find('.//corrected_response')
-    corrected_response = ''.join(ET.tostring(child, encoding='unicode') for child in corrected_response) if corrected_response is not None else ""
-    if corrected_response != "":
-        return ET.fromstring(f"<root>{corrected_response}</root>")
+    if root.find(".//thought") is not None and (
+        root.find(".//self_response") is not None
+        or root.find(".//response_to_user") is not None
+        or root.find(".//tool_call") is not None
+    ):
+        return root
     else:
         return ET.fromstring(f"<root>{llm_response_text}</root>")
     
 def tool_caller(tools: List, transcript: List[str]):
     openai_client = openai.OpenAI(
         api_key=OPENROUTER_API_KEY,
-        base_url="https://openroutder.ai/api/v1"
+        base_url="https://openrouter.ai/api/v1"
     )
     
     prompt = f'''<|begin_of_text|><|start_header_id|>system<|end_header_id|>

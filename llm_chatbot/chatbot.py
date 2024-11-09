@@ -48,7 +48,7 @@ class ChatBot:
 
         self.max_message_tokens = 32768
         self.max_reply_msg_tokens = 4096
-        self.max_recurse_depth = 10
+        self.max_recurse_depth = 6
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
@@ -77,6 +77,14 @@ class ChatBot:
             use_binary=False
         )
 
+        self.tool_rag = VectorSearch(
+            db_config=db_config,
+            dimensions= 512,
+            use_binary=False,
+            table_name=f"tool_rag_{chat_id.replace("-", "_")}"
+        )
+        self._load_tools_rag()
+        
         global logger
         self.user_id = user_id
         self.chat_id = chat_id
@@ -107,7 +115,7 @@ class ChatBot:
         logger.info({"event": "Received_user_message", "message": message})
         self._add_message({"role": "user", "content": message})
         try:
-            response = self._agent_loop()
+            response = self._agent_loop()['content']
         except Exception as e:
             logger.error({"event": "agent loop failed", "error": e})
             response = f"Agent failed to process data, Error: {e}"
@@ -247,13 +255,21 @@ class ChatBot:
 
         logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
 
+    def _load_tools_rag(self):
+        tools = []
+    
+        for tool_name in self.functions.keys():
+            if tool_name != 'overview':
+                tools.append((f"{tool_name}: {self.functions[tool_name]['schema']['function']['description']}\nparameters_schema: {self.functions[tool_name]['schema']['function']['parameters']}", None))
+        self.tool_rag.bulk_insert(tools)
+    
     def _agent_loop(self):
         self_recurse = True
         recursion_counter = 0
         while self_recurse and recursion_counter < self.max_recurse_depth:
 
-            transcript = [m for m in self.messages if m.get('role', 'system') != 'system']
-            tool_suggestions = utils.tool_caller(self.functions, transcript)
+            transcript_snippet = [m for m in self.messages[-2:] if m.get('role', 'system') != 'system']
+            tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=5, min_p=0.52)
             logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
             
             self.rolling_memory()
@@ -618,7 +634,7 @@ class ChatBot:
         self.conn.close()
 
     def execute(self, tool_suggestions):
-        self.system['content'] = re.sub(pattern='\n## Current Realtime Info\n.*\n\n## Available Tools Overview\n.*\n\n## Tool Suggestions\n.*\n\n## User Information\n.*\n\n## End\n', repl='', string=self.system['content'])
+        # self.system['content'] = self.system['content'].split("\n## Current Realtime Info\n")[0] + self.system['content'].split("\n## End\n")[1]
         current_info = f'''
 ## Current Realtime Info
 Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
@@ -635,7 +651,13 @@ HomeAddress: {USER_INFO['home_address']}
 
 ## End
 '''
-        self.system['content'] += current_info
+        regex = re.compile(r'\n## Current Realtime Info.*?## End\n', re.DOTALL)
+        # self.system['content'] += current_info
+        if regex.search(self.system['content']):
+            self.system['content'] = regex.sub(current_info, self.system['content'])
+        else:
+            self.system['content'] = self.system['content'] + '\n' + current_info
+    
         
         messages = [self.system]
         messages.extend(self.messages)
