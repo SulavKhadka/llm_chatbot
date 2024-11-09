@@ -152,7 +152,7 @@ queries i want it to succeed at:
 - looking for a hike close to the city like mabye an hour max from here. you got some suggestions?
 - what is the current car rental rate if i get a suv from the seatac airport?
 - how do i get to x place?(texts me a google maps link of the route)
-
+- can you transcribe this file for me and let me know once its transcribed?
 
 how can we save a topic to discuss later and have that be possible when they are ready to dissucss it?
     - feels related to previous conversation context RAG tool

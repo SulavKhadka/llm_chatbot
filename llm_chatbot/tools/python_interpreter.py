@@ -165,7 +165,7 @@ class UVPythonShellManager:
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         self.curr_session_id = None
 
-    def get_available_methods(self) -> List[Dict[str, str]]:
+    def _get_available_methods(self) -> List[Dict[str, str]]:
         """
         Returns a list of all public methods in the class along with their docstrings.
         

@@ -92,7 +92,7 @@ class SpotifyTool:
             raise
 
     def clear_auth_cache(self):
-        """Clear the stored authentication cache."""
+        """Clear the stored authentication cache for spotify if any error happens related to it."""
         try:
             if os.path.exists(self.cache_path):
                 os.remove(self.cache_path)
@@ -161,7 +161,7 @@ class SpotifyTool:
         except Exception as e:
             return None
 
-    def get_available_methods(self) -> List[Dict[str, str]]:
+    def _get_available_methods(self) -> List[Dict[str, str]]:
         """
         Returns a list of all public methods in the class along with their docstrings.
         
@@ -192,7 +192,7 @@ class SpotifyTool:
     @_ensure_spotify_connected
     @_require_active_device
     def play_pause(self):
-        """Toggle current playback between play and pause states.
+        """Toggle current spotify music playback between play and pause states.
         
         Args: None
 
@@ -233,7 +233,7 @@ class SpotifyTool:
     @_ensure_spotify_connected
     @_require_active_device
     def next_track(self) -> str:
-        """Skip to next track in queue.
+        """Skip to next track in queue on spotify.
         
         Args: None
 
@@ -264,7 +264,7 @@ class SpotifyTool:
     @_ensure_spotify_connected
     @_require_active_device
     def previous_track(self) -> str:
-        """Return to previous track.
+        """Return to previous track on spotify.
         
         Args: None
         
@@ -295,7 +295,7 @@ class SpotifyTool:
     @_ensure_spotify_connected
     @_require_active_device
     def set_volume(self, volume: int) -> str:
-        """Set playback volume level.
+        """Set the music playback volume level on spotify.
         
         Args:
             volume: Integer between 0-100 representing volume level
@@ -322,7 +322,7 @@ class SpotifyTool:
     @_require_active_device
     @_ensure_spotify_connected
     def search_and_play(self, query: str, type: str = "track") -> str:
-        """Search for and play specified content.
+        """Search for and play specified content on spotify.
         
         Args:
             query: Search string to find content
@@ -371,7 +371,7 @@ class SpotifyTool:
     
     @_ensure_spotify_connected
     def get_current_playback(self) -> str:
-        """Get information about currently playing content.
+        """Get information about currently playing music content on spotify.
         
         Args: None
 
@@ -402,7 +402,7 @@ class SpotifyTool:
 
     @_ensure_spotify_connected
     def get_devices(self) -> str:
-        """Retrieve list of available Spotify devices.
+        """Retrieve list of user's available Spotify devices.
         
         Args: None
 
@@ -444,7 +444,7 @@ class SpotifyTool:
     @_ensure_spotify_connected
     @_require_active_device
     def transfer_playback(self, device_id: str, force_play: bool = False) -> str:
-        """Transfer playback to specified device.
+        """Transfer playback to specified device on spotify.
         
         Args:
             device_id: Spotify device ID to transfer playback to
@@ -499,6 +499,349 @@ class SpotifyTool:
                 "is_playing": current['is_playing']
             })
                 
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def search_for_playlists(self, query: str, limit: int = 10) -> str:
+        """Search for playlists by name or description on spotify.
+        
+        Args:
+            query: Search term to find playlists
+            limit: Maximum number of playlists to return (default: 10)
+            
+        Returns:
+            JSON string containing:
+            - List of matching playlists with details
+            - Error message if operation fails
+        """
+        try:
+            results = self.sp.search(q=query, type='playlist', limit=limit)
+            
+            playlists = []
+            for item in results['playlists']['items']:
+                playlists.append({
+                    "name": item['name'],
+                    "id": item['id'],
+                    "uri": item['uri'],
+                    "owner": item['owner']['display_name'],
+                    "total_tracks": item['tracks']['total'],
+                    "description": item.get('description', ''),
+                    "is_public": item['public']
+                })
+            
+            return json.dumps({
+                "status": "success",
+                "query": query,
+                "matches_found": len(playlists),
+                "playlists": playlists
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def search_for_albums(self, query: str, limit: int = 10) -> str:
+        """Search for albums by name or artist on spotify.
+        
+        Args:
+            query: Search term to find albums
+            limit: Maximum number of albums to return (default: 10)
+            
+        Returns:
+            JSON string containing:
+            - List of matching albums with details
+            - Error message if operation fails
+        """
+        try:
+            results = self.sp.search(q=query, type='album', limit=limit)
+            
+            albums = []
+            for item in results['albums']['items']:
+                albums.append({
+                    "name": item['name'],
+                    "id": item['id'],
+                    "uri": item['uri'],
+                    "artists": [artist['name'] for artist in item['artists']],
+                    "total_tracks": item['total_tracks'],
+                    "release_date": item['release_date'],
+                    "type": item['album_type']  # 'album', 'single', or 'compilation'
+                })
+            
+            return json.dumps({
+                "status": "success",
+                "query": query,
+                "matches_found": len(albums),
+                "albums": albums
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def get_user_playlists(self, limit: int = 50) -> str:
+        """Get the current user's playlists from spotify.
+        
+        Args:
+            limit: Maximum number of playlists to return (default: 50)
+            
+        Returns:
+            JSON string containing:
+            - List of user's playlists with details
+            - Error message if operation fails
+        """
+        try:
+            results = self.sp.current_user_playlists(limit=limit)
+            
+            playlists = []
+            for item in results['items']:
+                playlists.append({
+                    "name": item['name'],
+                    "id": item['id'],
+                    "uri": item['uri'],
+                    "owner": item['owner']['display_name'],
+                    "total_tracks": item['tracks']['total'],
+                    "description": item.get('description', ''),
+                    "is_public": item['public']
+                })
+            
+            return json.dumps({
+                "status": "success",
+                "total_playlists": len(playlists),
+                "playlists": playlists
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def search_playlist(self, playlist_id: str, query: str) -> str:
+        """Search for tracks within a specific playlist on spotify.
+        
+        Args:
+            playlist_id: Spotify playlist ID, URI, or URL
+            query: Search query to filter tracks
+            
+        Returns:
+            JSON string containing:
+            - List of matching tracks with details
+            - Error message if operation fails
+        """
+        try:
+            # Get all tracks from the playlist
+            results = []
+            tracks = self.sp.playlist_tracks(playlist_id)
+            
+            while tracks:
+                for item in tracks['items']:
+                    track = item['track']
+                    # Skip None tracks (can happen with deleted songs)
+                    if track is None:
+                        continue
+                        
+                    # Create searchable string from track details
+                    search_string = f"{track['name']} {' '.join(artist['name'] for artist in track['artists'])}"
+                    
+                    # Check if query matches track details (case-insensitive)
+                    if query.lower() in search_string.lower():
+                        results.append({
+                            "name": track['name'],
+                            "artists": [artist['name'] for artist in track['artists']],
+                            "uri": track['uri'],
+                            "duration_ms": track['duration_ms'],
+                            "position": len(results)
+                        })
+                
+                # Get next page of tracks if available
+                if tracks['next']:
+                    tracks = self.sp.next(tracks)
+                else:
+                    tracks = None
+            
+            return json.dumps({
+                "status": "success",
+                "query": query,
+                "matches_found": len(results),
+                "tracks": results
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    @_require_active_device
+    def play_playlist(self, playlist_id: str, shuffle: bool = False) -> str:
+        """Play a specific playlist on spotify.
+        
+        Args:
+            playlist_id: Spotify playlist ID, URI, or URL
+            shuffle: Whether to shuffle the playlist (default: False)
+            
+        Returns:
+            JSON string containing:
+            - Playback confirmation and first track info
+            - Error message if operation fails
+        """
+        try:
+            # Set shuffle state before starting playback
+            self.sp.shuffle(shuffle)
+            
+            # Start playlist playback
+            self.sp.start_playback(context_uri=playlist_id)
+            
+            # Wait a moment for playback to start
+            import time
+            time.sleep(1)
+            
+            # Get current track info
+            track_info = self._get_current_track_info()
+            
+            return json.dumps({
+                "status": "success",
+                "action": "playing_playlist",
+                "shuffle": shuffle,
+                "track_info": track_info
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    @_require_active_device
+    def play_album(self, album_id: str) -> str:
+        """Play a specific album by album ID on spotify.
+        
+        Args:
+            album_id: Spotify album ID, URI, or URL
+            
+        Returns:
+            JSON string containing:
+            - Playback confirmation and first track info
+            - Error message if operation fails
+        """
+        try:
+            # Start album playback
+            self.sp.start_playback(context_uri=album_id)
+            
+            # Wait a moment for playback to start
+            import time
+            time.sleep(1)
+            
+            # Get current track info
+            track_info = self._get_current_track_info()
+            
+            return json.dumps({
+                "status": "success",
+                "action": "playing_album",
+                "track_info": track_info
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def get_playlist_tracks(self, playlist_id: str, limit: int = 100) -> str:
+        """Get a list of tracks in a spotify playlist.
+        
+        Args:
+            playlist_id: Spotify playlist ID, URI, or URL
+            limit: Maximum number of tracks to return (default: 100)
+            
+        Returns:
+            JSON string containing:
+            - List of tracks with details
+            - Error message if operation fails
+        """
+        try:
+            results = []
+            tracks = self.sp.playlist_tracks(playlist_id, limit=limit)
+            
+            while tracks and len(results) < limit:
+                for item in tracks['items']:
+                    if len(results) >= limit:
+                        break
+                        
+                    track = item['track']
+                    if track is None:  # Skip deleted tracks
+                        continue
+                        
+                    results.append({
+                        "name": track['name'],
+                        "artists": [artist['name'] for artist in track['artists']],
+                        "uri": track['uri'],
+                        "duration_ms": track['duration_ms'],
+                        "added_at": item['added_at']
+                    })
+                
+                if tracks['next'] and len(results) < limit:
+                    tracks = self.sp.next(tracks)
+                else:
+                    tracks = None
+            
+            return json.dumps({
+                "status": "success",
+                "total_tracks": len(results),
+                "tracks": results
+            })
+            
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+
+    @_ensure_spotify_connected
+    def get_album_tracks(self, album_id: str) -> str:
+        """Get a list of tracks in an album available in spotify.
+        
+        Args:
+            album_id: Spotify album ID, URI, or URL
+            
+        Returns:
+            JSON string containing:
+            - List of tracks with details
+            - Error message if operation fails
+        """
+        try:
+            tracks = self.sp.album_tracks(album_id)
+            results = []
+            
+            for track in tracks['items']:
+                results.append({
+                    "name": track['name'],
+                    "artists": [artist['name'] for artist in track['artists']],
+                    "uri": track['uri'],
+                    "duration_ms": track['duration_ms'],
+                    "track_number": track['track_number']
+                })
+            
+            return json.dumps({
+                "status": "success",
+                "total_tracks": len(results),
+                "tracks": results
+            })
+            
         except Exception as e:
             return json.dumps({
                 "status": "error",
