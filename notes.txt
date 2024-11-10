@@ -240,6 +240,21 @@ background_code_runners:
 
 two requests come in at the ~same time, its a bug but at a larger scale this will happen. how to think about this
 
+we provide an llm transcript with timestamp per turn and as training dat include a bunch of tool responses altering by small amounts across the transcript and ask about when a cerstain value was or what the state of something was x time add_generation_prompt
+
+for future iterations instead of take screenshots being the way to see whats on the screen, every N seconds(2-5) we just take a screenshot of the screen and run it through some parsing and classification in the background.
+    - agent can access it by querying on it.
+    - can be part of context gathering for user_query through RAG
+    - background updates as it completes sections so there is at least some context if we miss the mark by a few. need to order the predictions/response formatting with that in mind.
+
+
+on llm decoding as soon as we detect an end tool_call token then you check against available tools of agent and if tool not available:
+- inject wait but its not available.
+- inject "<eot_token><role_token>tool</role_token>{tool_name} is not a part of the toolset.<eot_token><role_token>assistant</role_token>" for a much faster turn around than waiting a turn but we would have to do a db update in there to maintain conversation consistency.
+
+
+tool use response can be long and have have really long responses or json structure that takes a lot of tokens. so we take them out once the response has been cooked up by the bot but, for future we save it as the a conversation rag so it can come back up in context if needed without taking up active conversation context
+
 
 
 
