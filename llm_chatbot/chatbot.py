@@ -281,7 +281,7 @@ class ChatBot:
                 parsed_response: AssistantResponse = self.execute(tool_suggestions)
             except Exception as e:
                 logger.debug({"event": "failed parsing assistant response", "error": e})
-                parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.loads({
+                parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
                         "thought": "looks like there was an error in my execution while processing user response",
                         "response": {
                             "type": ResponseType.INTERNAL_RESPONSE,
