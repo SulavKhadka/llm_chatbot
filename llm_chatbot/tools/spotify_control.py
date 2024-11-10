@@ -184,7 +184,8 @@ class SpotifyTool:
                 methods.append({
                     "name": name,
                     "docstring": docstring,
-                    "signature": f"{name}{signature}"
+                    "signature": f"{name}{signature}",
+                    "func": method
                 })
         
         return sorted(methods, key=lambda x: x["name"])
@@ -702,7 +703,7 @@ class SpotifyTool:
             self.sp.shuffle(shuffle)
             
             # Start playlist playback
-            self.sp.start_playback(context_uri=playlist_id)
+            self.sp.start_playback(context_uri=f"spotify:playlist:{playlist_id}")
             
             # Wait a moment for playback to start
             import time
@@ -739,7 +740,7 @@ class SpotifyTool:
         """
         try:
             # Start album playback
-            self.sp.start_playback(context_uri=album_id)
+            self.sp.start_playback(context_uri=f"spotify:album:{album_id}")
             
             # Wait a moment for playback to start
             import time

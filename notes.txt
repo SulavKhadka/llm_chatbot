@@ -285,3 +285,71 @@ tool use response can be long and have have really long responses or json struct
 [ ] idea exploration workflows to encourage assistant to act that way for these scenarios, maybe even trigger it with a phrase "lets get into a rabbit hole" "lets do some research discussion"
 [ ] add modality specific conversation reply generation commands: mentioned above with voice mode and text mode
 
+
+
+
+
+----------------------------------------------------------------------
+** TOOLS ** 
+----------------------------------------------------------------------
+
+## Spotify Tool
+
+### Description: 
+
+### available methods:
+    - next_track,
+    - play_pause,
+    - previous_track,
+    - search_and_play,
+    - set_volume,
+    - get_devices,
+    - search_for_playlists,
+    - search_for_albums,
+    - get_user_playlists,
+    - search_playlist,
+    - play_playlist,
+    - play_album,
+    - get_playlist_tracks,
+    - get_album_tracks,
+    - transfer_playback,
+### Things I want it to be able to do:
+    - play, pause, rewind, forward
+    - prev, next, shuffle, repeat, skip, queue
+    - get/set volume, switch devices
+    - search songs, albums, artists, playlists
+    - get playlist songs, album songs, queue list
+
+## Philips Hue Tool
+
+### Description: 
+
+### available methods:
+    - control_light
+    - activate_scene
+    - control_room_lights
+    - get_all_lights
+    - get_all_rooms
+    - get_all_scenes
+    - get_light_state
+### Things I want it to be able to do:
+    - turn on/off by lights, rooms, scenes
+    - control bulb properties(color, brightness, automation/animation patterns, etc)
+    - get info about light status, rooms, scenes, etc
+
+## Philips Hue Tool
+
+### Description: 
+
+### available methods:
+    - control_light
+    - activate_scene
+    - control_room_lights
+    - get_all_lights
+    - get_all_rooms
+    - get_all_scenes
+    - get_light_state
+### Things I want it to be able to do:
+    - turn on/off by lights, rooms, scenes
+    - control bulb properties(color, brightness, automation/animation patterns, etc)
+    - get info about light status, rooms, scenes, etc

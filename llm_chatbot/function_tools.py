@@ -1,3 +1,4 @@
+import inspect
 from llama_index.core.tools import FunctionTool
 import requests
 from geopy.geocoders import Nominatim
@@ -6,7 +7,7 @@ import mss.tools
 from datetime import datetime
 from PIL import Image, UnidentifiedImageError
 import numpy as np
-from langchain.tools import tool
+from langchain.tools import tool, StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
 from langchain_community.utilities import ArxivAPIWrapper
@@ -292,7 +293,38 @@ def get_tool_list_prompt(tools):
 
 
 def get_tools_overview(available_method_sets):
-    tool_overview_prompt = "".join(["<tool_method_set>" + json.dumps(tool._get_available_methods()) + "</tool_method_set>" for tool in available_method_sets])
+    # all this does is filter out the key, value pair of the actual func passed in from the tool class(its not serializable for the prompt)
+    tools = [
+        [
+            {
+                "name": fn_dict["name"],
+                "docstring": fn_dict["docstring"],
+                "signature": fn_dict["signature"],
+            }
+            for fn_dict in bot_tool._get_available_methods()
+        ]
+        for bot_tool in available_method_sets
+        if isinstance(bot_tool, StructuredTool) is False
+    ]
+
+    tools.extend(
+        [
+            {
+                "name": bot_tool.name,
+                "docstring": bot_tool.func.__doc__,
+                "signature": str(inspect.signature(bot_tool.func)),
+            }
+            for bot_tool in available_method_sets
+            if isinstance(bot_tool, StructuredTool)
+        ]
+    )
+
+    tool_overview_prompt = "".join(
+        [
+            "<tool_method_set>" + json.dumps(tool) + "</tool_method_set>"
+            for tool in tools
+        ]
+    )
     prompt = f'''<|begin_of_text|><|start_header_id|>system<|end_header_id|>
 You are to analyze the set of methods, given below, that are a components/facets of the same tool/functionality. The main task at hand is to output a detailed overview of the overall tools and the functionality they offer with all the methods each has in the format specified below. The summary should be concise yet detailed. Refer to the tool method set to properly understand and relay their functionality and the capability of the tool as a whole better in your description. You are to only output one {{tool: description}} pair per <tool_method_set> capturing the whole set of methods and their capabilities.
 
@@ -322,6 +354,7 @@ Your output should always be valid JSON in this format:
     return tools_overview
 
 def get_tools():
+    # Initalize tools
     interpreter = UVPythonShellManager()
     session = interpreter.create_session()
 
@@ -329,50 +362,73 @@ def get_tools():
         client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET
     )
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
-
-    tool_dict = {}
-    tool_dict["overview"] = get_tools_overview([
-        interpreter,
-        spotify,
-        hue_tool
-    ])
-
-    functions = [
+    
+    tools = [
         get_current_weather,
         web_search,
         take_screenshots,
         search_arxiv,
         open_image_file,
-        tool(interpreter.run_command),
-        tool(interpreter.run_python_code),
-        tool(spotify.get_current_playback),
-        tool(spotify.next_track),
-        tool(spotify.play_pause),
-        tool(spotify.previous_track),
-        tool(spotify.search_and_play),
-        tool(spotify.set_volume),
-        tool(spotify.get_devices),
-        tool(spotify.search_for_playlists),
-        tool(spotify.search_for_albums),
-        tool(spotify.get_user_playlists),
-        tool(spotify.search_playlist),
-        tool(spotify.play_playlist),
-        tool(spotify.play_album),
-        tool(spotify.get_playlist_tracks),
-        tool(spotify.get_album_tracks),
-        tool(spotify.transfer_playback),
-        tool(hue_tool.control_light),
-        tool(hue_tool.activate_scene),
-        tool(hue_tool.control_room_lights),
-        tool(hue_tool.get_all_lights),
-        tool(hue_tool.get_all_rooms),
-        tool(hue_tool.get_all_scenes),
-        tool(hue_tool.get_light_state),
+        interpreter,
+        spotify,
+        hue_tool
     ]
-    for fn in functions:
-        tool_schema = convert_to_openai_tool(fn)
-        tool_dict[tool_schema["function"]["name"]] = {
-            "schema": tool_schema,
-            "function": fn,
-        }
+
+    tool_dict = {}
+    tool_dict["overview"] = get_tools_overview(tools)
+
+    for bot_tool in tools:
+        tool_methods = []
+        if isinstance(bot_tool, StructuredTool):
+            tool_schema = convert_to_openai_tool(bot_tool)
+            tool_dict[tool_schema["function"]["name"]] = {
+                "tool_desc": bot_tool.func.__doc__,
+                "schema": tool_schema,
+                "function": bot_tool,
+            }
+        else:        
+            for fn in bot_tool._get_available_methods():
+                tool_schema = convert_to_openai_tool(tool(fn['func']))
+                tool_dict[tool_schema["function"]["name"]] = {
+                    "tool_desc": bot_tool.__doc__,
+                    "schema": tool_schema,
+                    "function": tool(fn['func']),
+                }
     return tool_dict
+
+
+
+
+# functions = [
+#         get_current_weather,
+#         web_search,
+#         take_screenshots,
+#         search_arxiv,
+#         open_image_file,
+#         tool(interpreter.run_command),
+#         tool(interpreter.run_python_code),
+#         tool(spotify.get_current_playback),
+#         tool(spotify.next_track),
+#         tool(spotify.play_pause),
+#         tool(spotify.previous_track),
+#         tool(spotify.search_and_play),
+#         tool(spotify.set_volume),
+#         tool(spotify.get_devices),
+#         tool(spotify.search_for_playlists),
+#         tool(spotify.search_for_albums),
+#         tool(spotify.get_user_playlists),
+#         tool(spotify.search_playlist),
+#         tool(spotify.play_playlist),
+#         tool(spotify.play_album),
+#         tool(spotify.get_playlist_tracks),
+#         tool(spotify.get_album_tracks),
+#         tool(spotify.transfer_playback),
+#         tool(hue_tool.control_light),
+#         tool(hue_tool.activate_scene),
+#         tool(hue_tool.control_room_lights),
+#         tool(hue_tool.get_all_lights),
+#         tool(hue_tool.get_all_rooms),
+#         tool(hue_tool.get_all_scenes),
+#         tool(hue_tool.get_light_state),
+#     ]
+    

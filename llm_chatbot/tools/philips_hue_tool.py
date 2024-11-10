@@ -43,7 +43,8 @@ class PhilipsHueTool:
                 methods.append({
                     "name": name,
                     "docstring": docstring,
-                    "signature": f"{name}{signature}"
+                    "signature": f"{name}{signature}",
+                    "func": method
                 })
         
         return sorted(methods, key=lambda x: x["name"])
