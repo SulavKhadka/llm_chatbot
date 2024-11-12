@@ -77,6 +77,56 @@ def get_size(obj, seen=None):
         
     return size
 
+def split_markdown_text(text):
+    """
+    Split markdown text into clean sentences by:
+    1. Replacing code blocks with placeholders
+    2. Stripping markdown syntax
+    3. Converting lists to plain text
+    4. Splitting by sentences
+    
+    Args:
+        text (str): Input markdown text
+    Returns:
+        list: Clean sentences
+    """
+    # Replace code blocks
+    def replace_code_block(match):
+        language = match.group(1) or "unknown"
+        return f"Refer to {language} code in chat"
+    
+    # Handle triple backtick code blocks
+    text = re.sub(r'```(\w+)?\n[\s\S]*?```', replace_code_block, text)
+    
+    # Handle inline code
+    text = re.sub(r'`[^`]+`', 'Refer to code in chat', text)
+    
+    # Strip markdown syntax
+    # Headers
+    text = re.sub(r'#{1,6}\s+', '', text)
+    # Bold and italic
+    text = re.sub(r'\*\*.*?\*\*', lambda m: m.group(0).strip('*'), text)
+    text = re.sub(r'\*.*?\*', lambda m: m.group(0).strip('*'), text)
+    text = re.sub(r'__.*?__', lambda m: m.group(0).strip('_'), text)
+    text = re.sub(r'_.*?_', lambda m: m.group(0).strip('_'), text)
+    
+    # Convert lists to plain text
+    # Unordered lists
+    text = re.sub(r'^\s*[-*+]\s+', '\n', text, flags=re.MULTILINE)
+    # Ordered lists
+    text = re.sub(r'^\s*\d+\.\s+', '\n', text, flags=re.MULTILINE)
+    
+    # Clean up extra whitespace and newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+    
+    # Split into sentences
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    
+    # Clean up sentences
+    sentences = [s.strip() for s in sentences if s.strip()]
+    
+    return sentences
 
 def unsanitize_content(sanitized_output):
     """

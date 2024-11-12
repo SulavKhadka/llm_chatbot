@@ -1385,7 +1385,10 @@ Secondaries:
 3. Repeated nested data consolidated when context-safe
 4. System metadata removed unless debugging
 5. Time formats simplified when context allows
-6. Multi-level relationships preserved when referenced'''
+6. Multi-level relationships preserved when referenced
+
+Remember your task is to optimize the tool call result size by context. Format it as you need to give back the info needed(returning extra info is ok but missing info is very bad) to process the info and continue the conversation further. You will be given the Context and the Original Response inside of <conversation_context> tags. You are to output only the new contextualized content(Optimized Response as shown in the examples).
+'''
 
 BOT_RESPONSE_FORMATTER_PROMPT = '''You are a specialized formatting assistant. Your only job is to take the assistant's response that follows a specific XML-like format and convert it into a JSON structure that matches the provided Pydantic schema. You must preserve the exact content without any modifications, summarization, or rewriting.
 
