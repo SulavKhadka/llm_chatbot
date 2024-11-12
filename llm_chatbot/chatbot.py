@@ -104,8 +104,8 @@ class ChatBot:
         """, (chat_id,))
         session_data = self.cur.fetchone()
         if not session_data:
-            logger.debug({"event": "chat_id not found", "chat_id": chat_id})
-            logger.info({"event": "chat_id not found", "message": "chat_id: {chat_id} not found. Creating new one under the provided chat_id: {chat_id}"})
+            logger.debug("chat_id not found {chat_id}", chat_id=chat_id)
+            logger.info("chat_id: {chat_id} not found. Creating new one under the provided chat_id", chat_id=chat_id)
             self._create_session(model, self.chat_id, tokenizer_model, system)
         else:
             self._load_session(self.chat_id, session_data)
@@ -113,12 +113,12 @@ class ChatBot:
         self.outlines_client = models.openai(self.openai_client, OpenAIConfig("self.model"))
 
     def __call__(self, message):
-        logger.info({"event": "Received_user_message", "message": message})
+        logger.info("Received_user_message {message}", message=message)
         self._add_message({"role": "user", "content": message})
         try:
             response = self._agent_loop()['content']
         except Exception as e:
-            logger.error({"event": "agent loop failed", "error": e})
+            logger.error("agent loop failed {error}", error=e)
             response = f"Agent failed to process data, Error: {e}"
         return response
 
@@ -254,7 +254,7 @@ class ChatBot:
         cur.close()
         conn.close()
 
-        logger.info(f"Database '{dbname}' and tables have been initialized successfully.")
+        logger.info("Database '{dbname}' and tables have been initialized successfully.", dbname=dbname)
 
     def _load_tools_rag(self):
         tools = []
@@ -270,17 +270,17 @@ class ChatBot:
         recursion_counter = 0
         processing_tool_call = []
         while self_recurse and recursion_counter < self.max_recurse_depth:
-            logger.debug({"event": "tracking agent recursion", "status": f"agent loop recursion depth: {recursion_counter}"})
+            logger.debug("agent loop recursion depth: {count}", count=recursion_counter)
             
             transcript_snippet = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
             tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=5, min_p=0.52)
-            logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
+            logger.debug("tool_caller_tool_suggestions {message}", message=tool_suggestions)
             
             self.rolling_memory()
             try:
                 parsed_response: AssistantResponse = self.execute(tool_suggestions)
             except Exception as e:
-                logger.debug({"event": "failed parsing assistant response", "error": e})
+                logger.debug("failed parsing assistant response {error}", error=e)
                 parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
                         "thought": "looks like there was an error in my execution while processing user response",
                         "response": {
@@ -300,7 +300,7 @@ class ChatBot:
                 self._add_message({"role": "assistant", "content": f"{llm_thought}\n<tool_use>\n{[tooly.model_dump() for tooly in parsed_response.response.content]}\n</tool_use>"})
                 
                 if len(tool_calls) > 0:
-                    logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
+                    logger.info("Extracted tool calls count: {count}", count=len(tool_calls))
                     tool_call_responses = []
                     for tool_call in tool_calls:
                         try:
@@ -319,20 +319,20 @@ class ChatBot:
 
                 # tool response cleanup from possible inner cycles and tool calls
                 # TODO: token counting is more complex now, somewhere else too, gotta comb the codebase
-                if len(processing_tool_call) > 0:
-                    for tool_call_resp in processing_tool_call:
-                        for i in range(len(self.messages)-1, 0, -1):
-                            if self.messages[i]['role'] == 'tool' and tool_call_resp == self.messages[i]['content']:
-                                logger.debug({"event": "deleting tool_call_response instance", "details": f"deleting message: {self.message[i]} to get tool response clear of the active conversation context"})
-                                self.messages.pop(i)
-                                break
+                # if len(processing_tool_call) > 0:
+                #     for tool_call_resp in processing_tool_call:
+                #         for i in range(len(self.messages)-1, 0, -1):
+                #             if self.messages[i]['role'] == 'tool' and tool_call_resp['content'] == self.messages[i]['content']:
+                #                 logger.debug("deleting tool_call_response instance message: {msg} to get tool response clear of the active conversation context", msg=self.messages[i])
+                #                 self.messages.pop(i)
+                #                 break
                 processing_tool_call = []
 
             if parsed_response.response.type  == ResponseType.INTERNAL_RESPONSE:
                 response = {"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response.response.content}</internal_response>"}
 
             self._add_message(response)
-            logger.info({"event": "Assistant_response", "response": response})
+            logger.info("Assistant_response {response}", response=response)
 
         return response
 
@@ -362,7 +362,7 @@ class ChatBot:
             "session_type": "new",
             "chat_id": str(self.chat_id)
         })
-        logger.debug({"event": "Initial_system_message", "system_message": self.system})
+        logger.debug("Initial_system_message {sys_msg}", sys_msg=self.system)
     
     def _load_session(self, chat_id: str, session_data: List):
         """
@@ -430,12 +430,11 @@ class ChatBot:
             "purged_messages": len(self.purged_messages),
             "total_tokens": self.total_messages_tokens
         })
-        logger.debug({
-            "event": "Session_state",
-            "active_messages": self.messages,
-            "purged_messages": self.purged_messages
-        })
-        logger.info({"event": "ChatBot_initialized", "model": self.model})
+        logger.debug("Session_state {active_messages} {purged_messages}",
+            active_messages=self.messages,
+            purged_messages=self.purged_messages
+        )
+        logger.info("ChatBot_initialized with {model}", model=self.model)
 
     def _add_message(self, message):
         self.messages.append(message)
@@ -450,11 +449,11 @@ class ChatBot:
         """, (self.chat_id, message['role'], message['content'], token_count))
         message_id = self.cur.fetchone()[0]
         self.conn.commit()
-        logger.debug({"event": "Added_message", "message": message, "token_count": token_count, "total_tokens": self.total_messages_tokens})
+        logger.debug("Added_message: {message}, token_count {token_count}, total_tokens {total_tokens} self.total_messages_tokens", message=message, token_count=token_count, total_tokens=self.total_messages_tokens)
         return message_id
 
     def _get_bot_response_json(self, response_text: str):
-        logger.debug({"event": "response_text_to_json", "response_text": response_text})
+        logger.debug("response_text_to_json: {response_text}", response_text=response_text)
         response_formatter_messages = [
             {"role": "system", "content": BOT_RESPONSE_FORMATTER_PROMPT},
             {"role": "user", "content": response_text}
@@ -469,17 +468,17 @@ class ChatBot:
                 }
             },
         )
-        logger.debug({"event": "response_text_to_json", "reformatted_text": response.choices[0].message.content})
+        logger.debug("response_text_to_json {reformatted_text}", reformatted_text=response.choices[0].message.content)
         ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
         return ass_resp
 
     def _parse_results(self, response_text: str):
         assistant_response = self._get_bot_response_json(response_text)
-        logger.debug({"event": "assistant_response_json", "response_json": assistant_response.model_dump()})
+        logger.debug("assistant_response_json {response_json}", response_json=assistant_response.model_dump())
         return assistant_response
 
     def _extract_function_calls(self, xml_response):
-        logger.debug({"event": "Extracting_function_calls", "response": xml_response})
+        logger.debug("Extracting_function_calls {response}", response=xml_response)
 
         tool_calls = []
         for element in xml_response.findall(".//tool_use"):
@@ -492,51 +491,52 @@ class ChatBot:
                     try:
                         json_data = ast.literal_eval(json_text)
                     except (SyntaxError, ValueError) as eval_err:
-                        logger.error({"event": "JSON_parsing_failed", "json_decode_error": str(json_err), "fallback_error": str(eval_err), "problematic_json_text": json_text})
+                        logger.error("JSON_parsing_failed {json_decode_error} {fallback_error} {problematic_json_text}", json_decode_error=str(json_err), fallback_error=str(eval_err), problematic_json_text=json_text)
                         continue
             except Exception as e:
-                logger.error({"event": "Cannot_strip_text", "error": str(e)})
+                logger.error("Cannot_strip_text {error}", error=str(e))
 
             if json_data is not None:
                 if isinstance(json_data, list):
                     tool_calls.extend(json_data)
                 else:
                     tool_calls.append(json_data)
-                logger.debug({"event": "Extracted_tool_call", "tool_call": json_data})
+                logger.debug("Extracted_tool_call {tool_call}", tool_call=json_data)
 
-        logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
+        logger.info("Extracted_tool_calls {count}", count=len(tool_calls))
         return tool_calls
 
     def _get_context_filtered_tool_results(self, tool_call: ToolParameter, tool_result):
-        context_messages = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
-        logger.debug({"event": "context_filtered_tool_result", "tool_call": tool_call.model_dump(), "conversation_context": context_messages})
+        context_messages = [m for m in self.messages[-2:] if m.get('role', 'system') != 'system']
+        logger.debug("context_filtered_tool_result {tool_call_result} {conversation_context}", tool_call_result=tool_result, conversation_context=context_messages)
         response_formatter_messages = [
             {"role": "system", "content": CONTEXT_FILTERED_TOOL_RESULT_PROMPT},
-            {"role": "user", "content": f"<conversation_context>{context_messages}</conversation_context>"}
+            {"role": "user", "content": f"<conversation_context>{context_messages}</conversation_context>\n<tool_result>{tool_result}</tool_result>"}
         ]
         response = self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="meta-llama/Meta-Llama-3-70B-Instruct-Turbo",
+            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            extra_body={"response_format": {"type": "json_object"}}
         )
-        logger.debug({"event": "context_filtered_tool_result", "reformatted_tool_result": response.choices[0].message.content})
-        return response.choices[0].message.content
+        logger.debug("context_filtered_tool_result {reformatted_tool_result}", reformatted_tool_result=response.choices[0].message.content)
+
+        return response.choices[0].message.content.replace("\n", " ").replace("\t", "")
 
     def _execute_function_call(self, tool_call: ToolParameter):
-        logger.info({"event": "Executing_function_call", "tool_call": tool_call})
+        logger.info("Executing_function_call {tool_call}", tool_call=tool_call)
         if tool_call.name is not None and tool_call.name in self.functions.keys():
             function_to_call = self.functions.get(tool_call.name, {}).get('function', None)
 
-            logger.debug({"event": "Function_call_details", "name": tool_call.name, "args": tool_call.parameters})
+            logger.debug("Function_call_details {name} {args}", name=tool_call.name, args=tool_call.parameters)
             try:
                 function_response = function_to_call.func(**tool_call.parameters)
-                logger.debug({"event": f"response size: {utils.get_size(function_response)}"})
-                if utils.get_size(function_response) > 50_500:
-                    logger.info({"event": "Function_call_result_filtering", "name": tool_call.name, "result": function_response})
-                    function_response = self._get_context_filtered_tool_results(tool_call, function_response)
+                logger.info("filtering function call response {name} {result}", name=tool_call.name, result=function_response)
+                function_response = self._get_context_filtered_tool_results(tool_call, function_response)
+                logger.debug("filtered function call response {name} {result}", name=tool_call.name, result=function_response)
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = {"name": tool_call.name, "content": function_response}
-            logger.debug({"event": "Function_call_response", "response": results_dict})
+            logger.debug("Function_call_response {response}", response=results_dict)
             
             # Log function call in database
             self.cur.execute("""
@@ -546,7 +546,7 @@ class ChatBot:
             self.conn.commit()
             return results_dict
         else:
-            logger.warning({"event": "Invalid_function_name", "name": tool_call.name})
+            logger.warning("Invalid_function_name {name}", name=tool_call.name)
             return f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
     def _get_chat_notes(self, message_id: str):
@@ -573,14 +573,14 @@ class ChatBot:
         ]
         completion = self.get_llm_response(messages, model_name=self.model)
 
-        logger.debug({"event": "parsing_chat_notes_llm_response", "response_text": completion})
+        logger.debug("parsing_chat_notes_llm_response {response_text}", response_text=completion)
         response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
         xml_root_element = f"<root>{response_text}</root>"
         
         try:
             root = ET.fromstring(xml_root_element)
         except ET.ParseError as e:
-            logger.error({"event": "failed_chat_summary_parsing", "error": e})
+            logger.error("failed_chat_summary_parsing {error}", error=e)
             raise(e)
 
         parsed_resp = {
@@ -615,14 +615,14 @@ class ChatBot:
         ]
         completion = self.get_llm_response(messages, model_name=self.model)
 
-        logger.debug({"event": "parsing_session_end_notes_llm_response", "response_text": completion})
+        logger.debug("parsing_session_end_notes_llm_response {response_text}", response_text=completion)
         response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
         xml_root_element = f"<root>{response_text}</root>"
         
         try:
             root = ET.fromstring(xml_root_element)
         except ET.ParseError as e:
-            logger.error({"event": "failed_session_final_notes_parsing", "error": e})
+            logger.error("failed_session_final_notes_parsing {error}", e)
             raise(e)
 
         parsed_resp = {
@@ -682,16 +682,16 @@ Preferences:
             
             messages = [self.system]
             messages.extend(self.messages)
-            logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
+            logger.info("Executing_LLM_call {message_count}", message_count=len(messages))
             completion = self.get_llm_response(messages=messages, model_name=self.model)
-            logger.debug({"event": "LLM_response", "response": completion.model_dump()})
-            logger.info({"event": "Token_usage", "usage": completion.usage.model_dump()})
+            logger.debug("LLM_response {response}", response=completion.model_dump())
+            logger.info("Token_usage {usage}", usage=completion.usage.model_dump())
 
             try:
                 parsed_response = self._parse_results(completion.choices[0].message.content)
                 return parsed_response
             except Exception as e:
-                logger.log({"event": "bot response failed", "Error": e})
+                logger.error("bot response failed {error}", error=e)
             retries -= 1
         
         return AssistantResponse.model_validate_json('''{
@@ -712,7 +712,7 @@ Preferences:
             self.purged_messages_token_count.append(purged_token_count)
 
             self.total_messages_tokens -= purged_token_count
-            logger.debug({"event": "Purged_message", "message": purged_message})
+            logger.debug("Purged_message {message}", message=purged_message)
 
         if initial_token_count != self.total_messages_tokens:
             logger.info({
@@ -720,8 +720,8 @@ Preferences:
                 "token_count_before": initial_token_count,
                 "token_count_after": self.total_messages_tokens
             })
-            logger.debug({"event": "Current_message_history", "messages": self.messages})
-            logger.debug({"event": "Purged_message_history", "purged_messages": self.purged_messages})
+            logger.debug("Current_message_history {messages}", messages=self.messages)
+            logger.debug("Purged_message_history {purged_messages}", messages=self.purged_messages)
         try:
             for purged_message in self.purged_messages:
                 self.cur.execute("""
@@ -731,11 +731,11 @@ Preferences:
                 """, (self.chat_id, purged_message['role'], purged_message['content']))
             self.conn.commit()
         except Exception as e:
-            logger.warning({"event": "db update exception", "error": e})
+            logger.error("db update exception {error}", error=e)
             raise
 
     def get_llm_response(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
-        logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
+        logger.debug("Sending_request_to_LLM {api_provider} {model} {messages}", api_provider=self.openai_client.base_url, model=model_name, messages=messages)
         if "openrouter" in self.openai_client.base_url.host:
             extra_body = extra_body if extra_body is not None else self.open_router_extra_body
         try:
@@ -748,15 +748,16 @@ Preferences:
             )
         except Exception as e:
             if e['code'] == 'model_not_available':
-                logger.warning({"event": "exception", "response": f"model not found as requested: {model_name}"})
-            else:
-                logger.warning({"event": "exception", "response": f"failed to get llm response. Error: {e}"})
+                logger.error("model not found as requested: {model_name}", model_name=model_name)
                 raise(e)
-        logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
+            else:
+                logger.error("failed to get llm response. Error: {ex}", ex=e)
+                raise(e)
+        logger.debug("Received_response_from_LLM {completion}", completion=chat_completion.model_dump())
         return chat_completion
     
     def get_llm_response_cfg(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
-        logger.debug({"event": "Sending_request_to_LLM", "api_provider": self.openai_client.base_url, "model": model_name, "messages": messages})
+        logger.debug("Sending_request_to_LLM {api_provider} {model} {messages}", api_provider=self.openai_client.base_url, model=model_name, messages=messages)
         if "openrouter" in self.openai_client.base_url.host:
             extra_body = extra_body if extra_body is not None else self.open_router_extra_body
         
@@ -773,7 +774,7 @@ Preferences:
                 pass
             else:
                 raise
-        logger.debug({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
+        logger.debug("Received_response_from_LLM {response}", response=chat_completion.model_dump())
         return chat_completion
 
     def get_working_llm_service(self, model_name: str):
