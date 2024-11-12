@@ -20,7 +20,7 @@ class PhilipsHueTool:
         self.base_url = f"https://{bridge_ip}/clip/v2"
         self.headers = {"hue-application-key": api_key}
     
-    def get_available_methods(self) -> List[Dict[str, str]]:
+    def _get_available_methods(self) -> List[Dict[str, str]]:
         """
         Returns a list of all public methods in the class along with their docstrings.
         
@@ -43,7 +43,8 @@ class PhilipsHueTool:
                 methods.append({
                     "name": name,
                     "docstring": docstring,
-                    "signature": f"{name}{signature}"
+                    "signature": f"{name}{signature}",
+                    "func": method
                 })
         
         return sorted(methods, key=lambda x: x["name"])
