@@ -7,10 +7,10 @@ import numpy as np
 import sounddevice as sd
 from queue import Queue, Empty
 from threading import Thread
-from tqdm import tqdm
+import time
 
 class TTSClient:
-    def __init__(self, server_url: str = "ws://100.78.237.8:8880/tts"):
+    def __init__(self, server_url: str = "ws://localhost:8000/tts"):
         self.server_url = server_url
         self.audio_queue = Queue()
         self.is_playing = False
@@ -25,6 +25,7 @@ class TTSClient:
 
     def stop_playback(self):
         """Stop the audio playback thread."""
+        print("stopping playback...")
         self.is_playing = False
         if self.playback_thread:
             self.playback_thread.join()
@@ -42,10 +43,11 @@ class TTSClient:
                     stream.write(audio_chunk)
                 except Empty:
                     self.is_playing = False
+                    break
                 except Exception as e:
                     print(f"Error playing audio: {e}")
 
-    async def stream_text(self, text: str, description: str = "Jon is speaking naturally."):
+    async def stream_text(self, text: str, description: str = "Jon is monotonically while speaking naturally."):
         """Send text to server and receive audio stream."""
         try:
             async with websockets.connect(self.server_url) as websocket:
@@ -88,16 +90,17 @@ async def main():
     try:
         # Stream some example text
         texts = [
-            'Four score and seven years ago our fathers brought forth on this continent, a new nation, conceived in Liberty, and dedicated to the proposition that all men are created equal.',
-            'Now we are engaged in a great civil war, testing whether that nation, or any nation so conceived and dedicated, can long endure.',
-            'We are met on a great battle-field of that war.']
+            "Hello! This is a test of the streaming text to speech system.",
+            "We can send multiple messages,",
+            "and they will be processed and played in order."
+        ]
         
-        for text in tqdm(texts):
+        for text in texts:
             await client.stream_text(text)
             await asyncio.sleep(2)  # Wait between messages
             
         # Wait for final audio to finish
-        await asyncio.sleep(4)
+        await asyncio.sleep(3)
         
     finally:
         client.stop_playback()

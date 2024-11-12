@@ -111,16 +111,7 @@ class SpeechSegmenter:
         return rms < self.silence_threshold
     
     def is_silence(self, audio_chunk):
-        """Check if an audio chunk is silence based on RMS value"""
-        
-        def int2float(sound):
-            abs_max = np.abs(sound).max()
-            sound = sound.astype('float32')
-            if abs_max > 0:
-                sound *= 1/32768
-            sound = sound.squeeze()  # depends on the use case
-            return sound
-        
+        """Check if an audio chunk is silence based on RMS value"""        
         vad_confidences = []
         for i in range(0, len(audio_chunk), self.vad_chunk_size):
             # some weirdness but its to make sure the vad_chunk is always some specified size.
