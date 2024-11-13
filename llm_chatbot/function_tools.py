@@ -22,6 +22,7 @@ from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
 from llm_chatbot.tools.spotify_control import SpotifyTool
 from llm_chatbot.tools.philips_hue_tool import PhilipsHueTool
+from llm_chatbot.tools.notifier_tool import NotifierTool
 import numpy as np
 from PIL import Image
 import os
@@ -362,6 +363,8 @@ def get_tools():
         client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET
     )
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
+
+    notifier_tool = NotifierTool()
     
     tools = [
         get_current_weather,
@@ -369,6 +372,7 @@ def get_tools():
         take_screenshots,
         search_arxiv,
         open_image_file,
+        notifier_tool,
         interpreter,
         spotify,
         hue_tool
