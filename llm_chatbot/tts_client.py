@@ -42,6 +42,7 @@ class TTSClient:
                     stream.write(audio_chunk)
                 except Empty:
                     self.is_playing = False
+                    break
                 except Exception as e:
                     print(f"Error playing audio: {e}")
 

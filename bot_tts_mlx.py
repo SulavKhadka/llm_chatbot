@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import sys
 import warnings
 from typing import List, Optional, Tuple, Union, Generator
@@ -11,6 +12,7 @@ from uuid import uuid4
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 import torch
+import pvporcupine
 
 from mlx_whisper.transcribe_stream import transcribe_stream  # Import the streaming transcription function
 from mlx_whisper.load_models import load_model
@@ -25,6 +27,7 @@ from mlx_whisper.audio import (
     log_mel_spectrogram,
 )
 from llm_chatbot.tts_client import TTSClient
+from secret_keys import PORCUPINE_API_KEY
 
 @dataclass
 class ClientRequest:
@@ -66,6 +69,8 @@ class SpeechSegmenter:
         self.silence_duration = silence_duration
         self.sample_rate = sample_rate
         self.chunk_duration = chunk_duration
+
+        self.wake_word_engine = pvporcupine.create(access_key=PORCUPINE_API_KEY, keywords=['porcupine'])
 
         # Initialize VAD model
         self.vad_model, self.vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
@@ -110,24 +115,31 @@ class SpeechSegmenter:
         print(f"rms value for silence: {rms}")
         return rms < self.silence_threshold
     
-    def is_silence(self, audio_chunk):
+    def is_silence(self, audio_chunk, audio_buffer):
         """Check if an audio chunk is silence based on RMS value"""
-        
-        def int2float(sound):
-            abs_max = np.abs(sound).max()
-            sound = sound.astype('float32')
-            if abs_max > 0:
-                sound *= 1/32768
-            sound = sound.squeeze()  # depends on the use case
-            return sound
         
         vad_confidences = []
         for i in range(0, len(audio_chunk), self.vad_chunk_size):
             # some weirdness but its to make sure the vad_chunk is always some specified size.
-            vad_chunk = np.zeros(self.vad_chunk_size, dtype=np.float32)
-            vad_chunk[:(min(self.sample_rate, i+self.vad_chunk_size) - i)] = audio_chunk[i:i+self.vad_chunk_size]
+            if i+self.vad_chunk_size > len(audio_chunk):
+                vad_chunk = np.zeros(self.vad_chunk_size, dtype=np.float32)
+                vad_chunk[:len(audio_chunk) - i] = audio_chunk[i:i+self.vad_chunk_size]
+            else:
+                vad_chunk = audio_chunk[i:i+self.vad_chunk_size]
             
-            vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            if self.wake_word_engine.process((vad_chunk * 32767).astype(np.int16)) >= 0:
+                if not self.is_speaking:
+                    new_audio_chunk = np.zeros(len(audio_chunk), dtype=np.float32)
+                    new_audio_chunk[i: len(audio_chunk)] = audio_chunk[i: len(audio_chunk)]
+                    audio_buffer = copy.deepcopy(new_audio_chunk)
+                    self.all_segments = []
+
+                    self.is_speaking = True
+                    return False
+            elif self.is_speaking:
+                vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            else:
+                vad_confidences.append(0.0)
         vad_confidences = torch.tensor(vad_confidences)
         chunk_silence_threshold = float(vad_confidences.mean())
         print(f"chunk_silence_threshold: {chunk_silence_threshold} | max_conf: {vad_confidences.max()} | median: {vad_confidences.median()} | min: {vad_confidences.min()}")
@@ -159,7 +171,8 @@ class SpeechSegmenter:
                 audio_buffer = np.concatenate((audio_buffer, audio_chunk))
 
                 # Check for silence
-                if self.is_silence(audio_chunk):
+                
+                if self.is_silence(audio_chunk, audio_buffer):
                     if self.is_speaking:
                         if silence_start is None:
                             silence_start = current_time
