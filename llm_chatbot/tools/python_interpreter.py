@@ -188,7 +188,8 @@ class UVPythonShellManager:
                 methods.append({
                     "name": name,
                     "docstring": docstring,
-                    "signature": f"{name}{signature}"
+                    "signature": f"{name}{signature}",
+                    "func": method
                 })
         
         return sorted(methods, key=lambda x: x["name"])
@@ -238,20 +239,20 @@ class UVPythonShellManager:
             with open(f"{session_dir}/install_postgres.sh", "w") as file:
                 file.write(bash_scripts['install_postgres'])
 
-            self.execute_command(process, f"export POSTGRES_PASSWORD='{POSTGRES_DB_PASSWORD}'", timeout=30)
-            self.execute_command(process, "export APP_DB_USER='chatbot_user'", timeout=30)
-            self.execute_command(process, "export APP_DB_NAME='chatbot_db'", timeout=30)
-            self.execute_command(process, f"export APP_DB_PASSWORD='app_{POSTGRES_DB_PASSWORD}'", timeout=30)
+            self._execute_command(process, f"export POSTGRES_PASSWORD='{POSTGRES_DB_PASSWORD}'", timeout=30)
+            self._execute_command(process, "export APP_DB_USER='chatbot_user'", timeout=30)
+            self._execute_command(process, "export APP_DB_NAME='chatbot_db'", timeout=30)
+            self._execute_command(process, f"export APP_DB_PASSWORD='app_{POSTGRES_DB_PASSWORD}'", timeout=30)
 
             logger.info("ensuring postgresql is installed")
-            postgres_setup_output = self.execute_command(process, f"/bin/bash {session_dir}/install_postgres.sh", timeout=30)
+            postgres_setup_output = self._execute_command(process, f"/bin/bash {session_dir}/install_postgres.sh", timeout=30)
 
 
             with open(f"{session_dir}/tmp_uv_setup_script.sh", "w") as file:
                 file.write(bash_scripts['tmp_uv_setup_script'])
 
             logger.info("ensuring uv is installed")
-            uv_setup_output = self.execute_command(process, f"/bin/bash {session_dir}/tmp_uv_setup_script.sh", timeout=30)
+            uv_setup_output = self._execute_command(process, f"/bin/bash {session_dir}/tmp_uv_setup_script.sh", timeout=30)
 
             self.curr_session_id = session_id
             self.active_sessions[session_id] = {
@@ -268,7 +269,7 @@ class UVPythonShellManager:
                 shutil.rmtree(session_dir)
             return {"status": "error", "message": f"Failed to create session: {str(e)}"}
 
-    def execute_command(self, process: subprocess.Popen, command: str, timeout: float = 30.0) -> Dict[str, str]:
+    def _execute_command(self, process: subprocess.Popen, command: str, timeout: float = 30.0) -> Dict[str, str]:
         """
         Executes a shell command in the context of a given process.
 
@@ -391,7 +392,7 @@ class UVPythonShellManager:
             return {"status": "error", "message": f"Session {session_id} not found"}
 
         process = self.active_sessions[session_id]['process']
-        return self.execute_command(process, command, timeout)
+        return self._execute_command(process, command, timeout)
 
     def run_python_code(self, code: str, session_id: str = None) -> Dict[str, str]:
         """
@@ -447,7 +448,7 @@ class UVPythonShellManager:
                 os.remove(script_path)
             return {"status": "error", "message": f"Failed to run code: {str(e)}"}
 
-    def install_package(self, package_name: str, session_id: str = None) -> Dict[str, str]:
+    def _install_package(self, package_name: str, session_id: str = None) -> Dict[str, str]:
         """
         Installs a Python package in a specific session using UV.
 
@@ -481,7 +482,7 @@ class UVPythonShellManager:
         
         return self.run_command(f"uv pip install {package_name}", session_id)
 
-    def uninstall_package(self, package_name: str, session_id: str = None) -> Dict[str, str]:
+    def _uninstall_package(self, package_name: str, session_id: str = None) -> Dict[str, str]:
         """
         Uninstalls a Python package from a specific session using UV.
 
@@ -515,7 +516,7 @@ class UVPythonShellManager:
         
         return self.run_command(f"uv pip uninstall -y {package_name}", session_id)
 
-    def close_session(self, session_id: str = None) -> Dict[str, str]:
+    def _close_session(self, session_id: str = None) -> Dict[str, str]:
         """
         Closes and cleans up a specific session.
 
@@ -573,7 +574,7 @@ if __name__ == "__main__":
         print(f"Code execution result: {code_result}")
 
         # Install a package
-        install_result = manager.install_package(session_id, "numpy")
+        install_result = manager._install_package(session_id, "numpy")
         print(f"Package installation result: {install_result}")
 
         # List installed packages
@@ -581,7 +582,7 @@ if __name__ == "__main__":
         print(f"Installed packages: {packages_result}")
 
         # Close the session
-        close_result = manager.close_session(session_id)
+        close_result = manager._close_session(session_id)
         print(f"Session close result: {close_result}")
     else:
         print(f"Failed to create session: {result['message']}")

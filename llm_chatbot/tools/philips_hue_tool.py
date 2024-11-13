@@ -2,7 +2,87 @@ import requests
 from typing import Dict, List, Optional, Union
 import inspect
 from urllib3.exceptions import InsecureRequestWarning
+from pydantic import BaseModel, Field
+
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+class Device(BaseModel):
+    rid: str
+    rtype: str = Field(..., description="Type of the device")
+
+class Service(BaseModel):
+    rid: str
+    rtype: str = Field(..., description="Type of the service")
+
+class Room(BaseModel):
+    id: str
+    name: str = Field(..., alias="metadata.name")
+    archetype: str = Field(..., alias="metadata.archetype")
+    children: List[Device]
+    services: List[Service]
+    
+class ColorPoint(BaseModel):
+    x: float
+    y: float
+
+class ColorGamut(BaseModel):
+    red: ColorPoint
+    green: ColorPoint
+    blue: ColorPoint
+    type: str = Field(..., alias="gamut_type")
+
+class LightState(BaseModel):
+    on: bool = Field(..., alias="on.on")
+    brightness: float = Field(..., alias="dimming.brightness")
+    color_temp: Optional[int] = Field(None, alias="color_temperature.mirek")
+    color: Optional[ColorPoint] = Field(None, alias="color.xy")
+    effect: str = Field("no_effect", alias="effects.status")
+
+class Light(BaseModel):
+    id: str
+    name: str = Field(..., alias="metadata.name")
+    archetype: str = Field(..., alias="metadata.archetype")
+    state: LightState
+    gamut: Optional[ColorGamut] = Field(None, alias="color.gamut")
+    
+    # Add commonly used derived properties
+    @property
+    def is_color_light(self) -> bool:
+        return self.gamut is not None
+    
+    @property
+    def supports_color_temp(self) -> bool:
+        return hasattr(self, "color_temperature_schema")
+
+class SceneAction(BaseModel):
+    target_id: str = Field(..., alias="target.rid")
+    on: Optional[bool] = Field(None, alias="action.on.on")
+    brightness: Optional[float] = Field(None, alias="action.dimming.brightness")
+    color_temp: Optional[int] = Field(None, alias="action.color_temperature.mirek")
+    color: Optional[ColorPoint] = Field(None, alias="action.color.xy")
+
+class Scene(BaseModel):
+    id: str
+    name: str = Field(..., alias="metadata.name")
+    room_id: str = Field(..., alias="group.rid")
+    actions: List[SceneAction]
+    speed: float
+    auto_dynamic: bool
+    image_id: Optional[str] = Field(None, alias="metadata.image.rid")
+
+def parse_light_response(response: Dict) -> List[Light]:
+    """Parse raw API response into Light objects"""
+    return response
+    #return [Light(**light) for light in response.get("data", [])]
+
+def parse_room_response(response: Dict) -> List[Room]:
+    """Parse raw API response into Room objects"""
+    return [Room(**room) for room in response.get("data", [])]
+
+def parse_scene_response(response: Dict) -> List[Scene]:
+    """Parse raw API response into Scene objects"""
+    return [Scene(**scene) for scene in response.get("data", [])]
+
 
 class PhilipsHueTool:
     """A tool for interacting with Philips Hue lights and scenes."""
@@ -43,7 +123,8 @@ class PhilipsHueTool:
                 methods.append({
                     "name": name,
                     "docstring": docstring,
-                    "signature": f"{name}{signature}"
+                    "signature": f"{name}{signature}",
+                    "func": method
                 })
         
         return sorted(methods, key=lambda x: x["name"])
@@ -63,15 +144,15 @@ class PhilipsHueTool:
 
     def get_all_lights(self) -> Dict:
         """Get information about all lights."""
-        return self._make_request("GET", "resource/light")
+        return parse_light_response(self._make_request("GET", "resource/light"))
     
     def get_all_rooms(self) -> Dict:
         """Get information about all rooms."""
-        return self._make_request("GET", "resource/room")
+        return parse_room_response(self._make_request("GET", "resource/room"))
     
     def get_all_scenes(self) -> Dict:
         """Get information about all scenes."""
-        return self._make_request("GET", "resource/scene")
+        return parse_scene_response(self._make_request("GET", "resource/scene"))
 
     def control_light(self, light_id: str, **kwargs) -> Dict:
         """

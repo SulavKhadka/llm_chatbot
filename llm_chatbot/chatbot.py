@@ -22,8 +22,9 @@ from outlines.models.openai import OpenAIConfig
 from llm_chatbot import function_tools, utils
 from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
+from llm_chatbot.chatbot_data_models import AssistantResponse, ResponseType, ToolParameter
 from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY, USER_INFO
-from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, RESPONSE_CFG_GRAMMAR
+from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, BOT_RESPONSE_FORMATTER_PROMPT, CONTEXT_FILTERED_TOOL_RESULT_PROMPT, RESPONSE_CFG_GRAMMAR
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -48,7 +49,7 @@ class ChatBot:
 
         self.max_message_tokens = 32768
         self.max_reply_msg_tokens = 4096
-        self.max_recurse_depth = 6
+        self.max_recurse_depth = 12
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
@@ -260,32 +261,43 @@ class ChatBot:
     
         for tool_name in self.functions.keys():
             if tool_name != 'overview':
-                tools.append((f"{tool_name}: {self.functions[tool_name]['schema']['function']['description']}\nparameters_schema: {self.functions[tool_name]['schema']['function']['parameters']}", None))
+                tool_fn = self.functions[tool_name]
+                tools.append((f"{tool_name}: {tool_fn['schema']['function']['description']}\nparameters_schema: {tool_fn['schema']['function']['parameters']}\n\nTool Group Description: {tool_fn['tool_desc']}\n", None))
         self.tool_rag.bulk_insert(tools)
     
     def _agent_loop(self):
         self_recurse = True
         recursion_counter = 0
+        processing_tool_call = []
         while self_recurse and recursion_counter < self.max_recurse_depth:
-
-            transcript_snippet = [m for m in self.messages[-2:] if m.get('role', 'system') != 'system']
+            logger.debug({"event": "tracking agent recursion", "status": f"agent loop recursion depth: {recursion_counter}"})
+            
+            transcript_snippet = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
             tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=5, min_p=0.52)
             logger.debug({"event": "tool_caller_tool_suggestions", "message": tool_suggestions})
             
             self.rolling_memory()
             try:
-                completion = self.execute(tool_suggestions)
-                parsed_response = self._parse_results(completion.choices[0].message.content)
+                parsed_response: AssistantResponse = self.execute(tool_suggestions)
             except Exception as e:
-                completion = f"<thought>looks like there was an error in my execution while processing user response</thought><internal_response>Error Details:\n\n{e}</internal_response>"
-                parsed_response = self._parse_results(completion)
+                logger.debug({"event": "failed parsing assistant response", "error": e})
+                parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
+                        "thought": "looks like there was an error in my execution while processing user response",
+                        "response": {
+                            "type": ResponseType.INTERNAL_RESPONSE,
+                            "content": f"internal error happened in agent loop. Error: {e}"
+                        }
+                    })
+                )
             
             recursion_counter += 1
-            llm_thought = f"<thought>{parsed_response['thought']}</thought>"
+            llm_thought = f"<thought>{parsed_response.thought}</thought>"
 
-            if parsed_response['response']['type'] == "TOOL_CALL":
-                tool_calls = parsed_response['response']['response']
-                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<tool_call>\n{parsed_response['response']['response']}\n</tool_call>"})
+            if parsed_response.response.type == ResponseType.TOOL_USE:
+                tool_calls = parsed_response.response.content
+                if isinstance(parsed_response.response.content, str):
+                    tool_calls = json.loads(parsed_response.response.content)
+                self._add_message({"role": "assistant", "content": f"{llm_thought}\n<tool_use>\n{[tooly.model_dump() for tooly in parsed_response.response.content]}\n</tool_use>"})
                 
                 if len(tool_calls) > 0:
                     logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
@@ -297,17 +309,28 @@ class ChatBot:
                         except Exception as e:
                             tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
                     response = {"role": "tool", "content": f"<tool_call_response>\n{tool_call_responses}\n</tool_call_response>"}
+                    processing_tool_call.append(response)
                 else:
-                    self_recurse = False
                     response = f"{llm_thought}\n<internal_response>no tool calls found, continuing on</internal_response>"
             
-            if parsed_response['response']['type'] == "USER_RESPONSE":
+            if parsed_response.response.type == ResponseType.USER_RESPONSE:
                 self_recurse = False
-                response = {"role": "assistant", "content": f"{llm_thought}\n<response_to_user>{parsed_response['response']['response']}</response_to_user>"}
+                response = {"role": "assistant", "content": f"{llm_thought}\n<response_to_user>{parsed_response.response.content}</response_to_user>"}
 
-            if parsed_response['response']['type'] == "SELF_RESPONSE":
-                response = {"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response['response']['response']}</internal_response>"}
-            
+                # tool response cleanup from possible inner cycles and tool calls
+                # TODO: token counting is more complex now, somewhere else too, gotta comb the codebase
+                if len(processing_tool_call) > 0:
+                    for tool_call_resp in processing_tool_call:
+                        for i in range(len(self.messages)-1, 0, -1):
+                            if self.messages[i]['role'] == 'tool' and tool_call_resp == self.messages[i]['content']:
+                                logger.debug({"event": "deleting tool_call_response instance", "details": f"deleting message: {self.message[i]} to get tool response clear of the active conversation context"})
+                                self.messages.pop(i)
+                                break
+                processing_tool_call = []
+
+            if parsed_response.response.type  == ResponseType.INTERNAL_RESPONSE:
+                response = {"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response.response.content}</internal_response>"}
+
             self._add_message(response)
             logger.info({"event": "Assistant_response", "response": response})
 
@@ -430,65 +453,41 @@ class ChatBot:
         logger.debug({"event": "Added_message", "message": message, "token_count": token_count, "total_tokens": self.total_messages_tokens})
         return message_id
 
+    def _get_bot_response_json(self, response_text: str):
+        logger.debug({"event": "response_text_to_json", "response_text": response_text})
+        response_formatter_messages = [
+            {"role": "system", "content": BOT_RESPONSE_FORMATTER_PROMPT},
+            {"role": "user", "content": response_text}
+        ]
+        response = self.get_llm_response(
+            messages=response_formatter_messages,
+            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            extra_body={
+                "response_format": {
+                    "type": "json_object",
+                    "schema": AssistantResponse.model_json_schema(),
+                }
+            },
+        )
+        logger.debug({"event": "response_text_to_json", "reformatted_text": response.choices[0].message.content})
+        ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
+        return ass_resp
+
     def _parse_results(self, response_text: str):
-        logger.debug({"event": "Parsing_llm_response", "response_text": response_text})
-        sanitized_response_text = utils.sanitize_inner_content(response_text)
-        xml_root_element = f"""<root>{sanitized_response_text}</root>"""
-        
-        try:
-            root = ET.fromstring(xml_root_element)
-        except ET.ParseError:
-            root = utils.ensure_llm_response_format(response_text)
-
-        parsed_resp = {
-            "thought": "",
-            "response": {
-                "type": "",
-                "response": ""
-            }
-        }
-
-        thoughts = []
-        for element in root.findall(".//thought"):
-            thoughts.append(utils.unsanitize_content(element.text))
-        parsed_resp['thought'] = "\n".join(thoughts).strip()
-
-        user_response = ""
-        for element in root.findall(".//response_to_user"):
-            user_response += utils.unsanitize_content(element.text)
-        if user_response != "":
-            parsed_resp['response']['type'] = "USER_RESPONSE"
-            parsed_resp['response']['response'] = user_response.strip()
-            return parsed_resp 
-
-        self_response = ""
-        for element in root.findall(".//internal_response"):
-            self_response += utils.unsanitize_content(element.text)
-        if self_response != "":
-            parsed_resp['response']['type'] = "SELF_RESPONSE"
-            parsed_resp['response']['response'] = self_response
-            return parsed_resp 
-        
-        tool_calls = self._extract_function_calls(root)
-        if tool_calls != []:
-            parsed_resp['response']['type'] = "TOOL_CALL"
-            parsed_resp['response']['response'] = tool_calls
-            return parsed_resp 
-        
-        parsed_resp['response']['type'] = "USER_RESPONSE"
-        parsed_resp['response']['response'] = response_text
-        return parsed_resp 
+        assistant_response = self._get_bot_response_json(response_text)
+        logger.debug({"event": "assistant_response_json", "response_json": assistant_response.model_dump()})
+        return assistant_response
 
     def _extract_function_calls(self, xml_response):
         logger.debug({"event": "Extracting_function_calls", "response": xml_response})
 
         tool_calls = []
-        for element in xml_response.findall(".//tool_call"):
+        for element in xml_response.findall(".//tool_use"):
             json_data = None
             try:
                 json_text = element.text.strip()
                 try:
-                    json_data = json.loads(json_text)
+                    json_data = ast.literal_eval(json_text)
                 except json.JSONDecodeError as json_err:
                     try:
                         json_data = ast.literal_eval(json_text)
@@ -508,31 +507,47 @@ class ChatBot:
         logger.info({"event": "Extracted_tool_calls", "count": len(tool_calls)})
         return tool_calls
 
-    def _execute_function_call(self, tool_call):
-        logger.info({"event": "Executing_function_call", "tool_call": tool_call})
-        function_name = tool_call.get("name", None)
-        if function_name is not None and function_name in self.functions.keys():
-            function_to_call = self.functions.get(function_name, {}).get('function', None)
-            function_args = tool_call.get("parameters", {})
+    def _get_context_filtered_tool_results(self, tool_call: ToolParameter, tool_result):
+        context_messages = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
+        logger.debug({"event": "context_filtered_tool_result", "tool_call": tool_call.model_dump(), "conversation_context": context_messages})
+        response_formatter_messages = [
+            {"role": "system", "content": CONTEXT_FILTERED_TOOL_RESULT_PROMPT},
+            {"role": "user", "content": f"<conversation_context>{context_messages}</conversation_context>"}
+        ]
+        response = self.get_llm_response(
+            messages=response_formatter_messages,
+            model_name="meta-llama/Meta-Llama-3-70B-Instruct-Turbo",
+        )
+        logger.debug({"event": "context_filtered_tool_result", "reformatted_tool_result": response.choices[0].message.content})
+        return response.choices[0].message.content
 
-            logger.debug({"event": "Function_call_details", "name": function_name, "args": function_args})
+    def _execute_function_call(self, tool_call: ToolParameter):
+        logger.info({"event": "Executing_function_call", "tool_call": tool_call})
+        if tool_call.name is not None and tool_call.name in self.functions.keys():
+            function_to_call = self.functions.get(tool_call.name, {}).get('function', None)
+
+            logger.debug({"event": "Function_call_details", "name": tool_call.name, "args": tool_call.parameters})
             try:
-                function_response = function_to_call.func(**function_args)
+                function_response = function_to_call.func(**tool_call.parameters)
+                logger.debug({"event": f"response size: {utils.get_size(function_response)}"})
+                if utils.get_size(function_response) > 50_500:
+                    logger.info({"event": "Function_call_result_filtering", "name": tool_call.name, "result": function_response})
+                    function_response = self._get_context_filtered_tool_results(tool_call, function_response)
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
-            results_dict = f'{{"name": "{function_name}", "content": {function_response}}}'
+            results_dict = {"name": tool_call.name, "content": function_response}
             logger.debug({"event": "Function_call_response", "response": results_dict})
             
             # Log function call in database
             self.cur.execute("""
                 INSERT INTO function_calls (chat_id, function_name, parameters, response)
                 VALUES (%s, %s, %s, %s)
-            """, (self.chat_id, function_name, Json(function_args), str(function_response)))
+            """, (self.chat_id, tool_call.name, Json(tool_call.parameters), str(function_response)))
             self.conn.commit()
             return results_dict
         else:
-            logger.warning({"event": "Invalid_function_name", "name": function_name})
-            return f'{{"name": "{function_name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
+            logger.warning({"event": "Invalid_function_name", "name": tool_call.name})
+            return f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
     def _get_chat_notes(self, message_id: str):
 
@@ -633,9 +648,11 @@ class ChatBot:
         self.cur.close()
         self.conn.close()
 
-    def execute(self, tool_suggestions):
-        # self.system['content'] = self.system['content'].split("\n## Current Realtime Info\n")[0] + self.system['content'].split("\n## End\n")[1]
-        current_info = f'''
+    def execute(self, tool_suggestions, retries: int = 3):
+        # prefs = "\t-".join([i for i in USER_INFO['preferences']])
+        
+        while retries > 0:
+            current_info = f'''
 ## Current Realtime Info
 Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
 
@@ -646,26 +663,44 @@ Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
 {tool_suggestions}
 
 ## User Information
-Username: {USER_INFO['username']}
-HomeAddress: {USER_INFO['home_address']}
+Name: {USER_INFO['username']}
+Home Address: {USER_INFO['home_address']}
+Preferences:
+    - Measurement unit: {USER_INFO['units']}
+    - {"\t- ".join([i for i in USER_INFO['preferences']])}
+
 
 ## End
-'''
-        regex = re.compile(r'\n## Current Realtime Info.*?## End\n', re.DOTALL)
-        # self.system['content'] += current_info
-        if regex.search(self.system['content']):
-            self.system['content'] = regex.sub(current_info, self.system['content'])
-        else:
-            self.system['content'] = self.system['content'] + '\n' + current_info
-    
+    '''
+            regex = re.compile(r'## Current Realtime Info.*?## End\n', re.DOTALL)
+            # self.system['content'] += current_info
+            if regex.search(self.system['content']):
+                self.system['content'] = regex.sub(current_info, self.system['content'])
+            else:
+                self.system['content'] = self.system['content'] + '\n' + current_info
         
-        messages = [self.system]
-        messages.extend(self.messages)
-        logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
-        completion = self.get_llm_response(messages=messages, model_name=self.model)
-        logger.debug({"event": "LLM_response", "response": completion.model_dump()})
-        logger.info({"event": "Token_usage", "usage": completion.usage.model_dump()})
-        return completion
+            
+            messages = [self.system]
+            messages.extend(self.messages)
+            logger.info({"event": "Executing_LLM_call", "message_count": len(messages)})
+            completion = self.get_llm_response(messages=messages, model_name=self.model)
+            logger.debug({"event": "LLM_response", "response": completion.model_dump()})
+            logger.info({"event": "Token_usage", "usage": completion.usage.model_dump()})
+
+            try:
+                parsed_response = self._parse_results(completion.choices[0].message.content)
+                return parsed_response
+            except Exception as e:
+                logger.log({"event": "bot response failed", "Error": e})
+            retries -= 1
+        
+        return AssistantResponse.model_validate_json('''{
+            "thought": "[NOT AVAILBALE. THIS IS AN INJECTED MESSAGE BECAUSE OF INTERNAL LLM CALLING FAILURE]",
+            "response": {
+                "type": ResponseType.INTERNAL_RESPONSE,
+                "content": f"internal error happened trying to call llm. Error: {e}"
+            }'''
+        )
 
     def rolling_memory(self):
         initial_token_count = self.total_messages_tokens
@@ -708,7 +743,7 @@ HomeAddress: {USER_INFO['home_address']}
                 model=model_name,
                 messages=messages,
                 max_tokens=self.max_reply_msg_tokens,
-                temperature=0.4,
+                temperature=0.1,
                 extra_body= extra_body
             )
         except Exception as e:
