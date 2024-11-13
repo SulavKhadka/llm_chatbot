@@ -273,12 +273,12 @@ class ChatBot:
             logger.debug("agent loop recursion depth: {count}", count=recursion_counter)
             
             transcript_snippet = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
-            tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=5, min_p=0.52)
-            logger.debug("tool_caller_tool_suggestions {message}", message=tool_suggestions)
+            tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=15, min_p=0.2)
+            logger.debug("tool_caller_tool_suggestions(top {top_k}) {message}", top_k=15, message=tool_suggestions)
             
             self.rolling_memory()
             try:
-                parsed_response: AssistantResponse = self.execute(tool_suggestions)
+                parsed_response: AssistantResponse = self.execute(tool_suggestions[:5])
             except Exception as e:
                 logger.debug("failed parsing assistant response {error}", error=e)
                 parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
