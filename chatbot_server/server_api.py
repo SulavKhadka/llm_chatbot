@@ -1,12 +1,12 @@
 from typing import Union
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from fastapi import FastAPI
 from llm_chatbot.chatbot import ChatBot
 from llm_chatbot import utils, function_tools
 from uuid import uuid4
 import xml.etree.ElementTree as ET
 from secret_keys import POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT, TOOLS_PROMPT_SNIPPET, RESPONSE_FLOW_2, SYS_PROMPT_MD_TOP, SYS_PROMPT_MD_BOTTOM
+from prompts import SYS_PROMPT_V3, SYS_PROMPT_MD_TOP, SYS_PROMPT_MD_BOTTOM
 
 # tools_prompt = TOOLS_PROMPT_SNIPPET.format(
 #     TOOL_LIST=function_tools.get_tool_list_prompt(function_tools.get_tools())
@@ -37,11 +37,11 @@ active_sessions: dict[str, ChatBot] = {}
 def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
     if user_id not in active_sessions:
         active_sessions[user_id] = ChatBot(
-            model = "Qwen/Qwen2.5-72B-Instruct-Turbo",
-            tokenizer_model= "Qwen/Qwen2.5-72B-Instruct",
+            model = "perplexity/llama-3.1-sonar-large-128k-chat",
+            tokenizer_model= "meta-llama/Llama-3.1-70B-Instruct",
             user_id = user_id,
             chat_id = str(uuid4()) if chat_id is None else chat_id,
-            system=chatbot_system_msg,
+            system=SYS_PROMPT_V3,
             db_config=db_config
         )
     return active_sessions[user_id]
@@ -54,6 +54,8 @@ def process_message(user_id: str, session_id: str, client_request: ClientRequest
         chatbot = get_session(user_id=user_id, chat_id=session_id)
     
     print(client_request.message)
+    if client_request.client_type == "notifier":
+        response = chatbot(str(asdict(client_request)), role="tool")
     response = chatbot(client_request.message)
     print(response)
     sanitized_response = utils.sanitize_inner_content(response)

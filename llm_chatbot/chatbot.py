@@ -53,15 +53,16 @@ class ChatBot:
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
         self.openai_client = openai.OpenAI(
-            base_url="https://api.together.xyz/v1",
-            api_key=TOGETHER_AI_TOKEN,
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
         )
-        self.open_router_extra_body = {"provider": {
-                "order": [
-                    "Together"
-                ]
-            }
-        }
+        self.open_router_extra_body = None
+        # {"provider": {
+        #         "order": [
+        #             "Together"
+        #         ]
+        #     }
+        # }
 
         if db_config is None:
             db_config = {
@@ -90,6 +91,7 @@ class ChatBot:
         self.user_id = user_id
         self.chat_id = chat_id
         logger.bind(chat_id=self.chat_id)
+        logger.configure(extra={"chat_id": self.chat_id})
 
         # Database connection
         self.initialize_db(**db_config)
@@ -112,7 +114,8 @@ class ChatBot:
 
         self.outlines_client = models.openai(self.openai_client, OpenAIConfig("self.model"))
 
-    def __call__(self, message):
+    def __call__(self, message, role="user"):
+        # TODO: adjust structure to take in if its a notification or alert from a tool and the notifier
         logger.info("Received_user_message {message}", message=message)
         self._add_message({"role": "user", "content": message})
         try:
@@ -460,11 +463,10 @@ class ChatBot:
         ]
         response = self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            model_name="google/gemini-flash-1.5-8b",
             extra_body={
                 "response_format": {
                     "type": "json_object",
-                    "schema": AssistantResponse.model_json_schema(),
                 }
             },
         )
@@ -515,7 +517,7 @@ class ChatBot:
         ]
         response = self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            model_name="google/gemini-flash-1.5-8b",
             extra_body={"response_format": {"type": "json_object"}}
         )
         logger.debug("context_filtered_tool_result {reformatted_tool_result}", reformatted_tool_result=response.choices[0].message.content)
