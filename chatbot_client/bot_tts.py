@@ -146,36 +146,37 @@ class SpeechSegmenter:
                 current_time = time.time()
 
                 # Check for silence
-                if self.is_silence(audio_chunk) and not self.tts_engine.is_playing:
-                    if (self.is_speaking and 
-                        (current_time - self.last_speech_time) > self.silence_duration):
-                        
-                        # End of speech segment detected
-                        self.is_speaking = False
-                        final_output = self.online.finish()
-                        
-                        if final_output[2]:
-                            self.all_segments.append(final_output[2])
+                if self.tts_engine.is_playing is False:
+                    if self.is_silence(audio_chunk):
+                        if (self.is_speaking and 
+                            (current_time - self.last_speech_time) > self.silence_duration):
+                            
+                            # End of speech segment detected
+                            self.is_speaking = False
+                            final_output = self.online.finish()
+                            
+                            if final_output[2]:
+                                self.all_segments.append(final_output[2])
 
-                        user_input_segment = "".join(self.all_segments)
-                        print(f"Speech segment complete: {user_input_segment}")
-                        
-                        message = ClientRequest(
-                            user_id="",
-                            client_type="voice",
-                            message=user_input_segment,
-                            user_metadata={}
-                        )
-                        
-                        # Put message in queue
-                        await user_queue.put(message)
-                        print("Message sent to queue")
-                        
-                        self.all_segments = []
-                        self.online.init()
-                else:
-                    self.last_speech_time = current_time
-                    self.is_speaking = True
+                            user_input_segment = "".join(self.all_segments)
+                            print(f"Speech segment complete: {user_input_segment}")
+                            
+                            message = ClientRequest(
+                                user_id="",
+                                client_type="voice",
+                                message=user_input_segment,
+                                user_metadata={}
+                            )
+                            
+                            # Put message in queue
+                            await user_queue.put(message)
+                            print("Message sent to queue")
+                            
+                            self.all_segments = []
+                            self.online.init()
+                    else:
+                        self.last_speech_time = current_time
+                        self.is_speaking = True
 
                 # Process with Whisper if in speech segment
                 if self.is_speaking:
@@ -190,7 +191,7 @@ class SpeechSegmenter:
                 await asyncio.sleep(0)
                 
         except Exception as e:
-            print(f"Error in process_audio: {e}", exc_info=True)
+            print(f"Error in process_audio: {e}")
         finally:
             self.stop_audio_stream()
             print("Audio processing stopped")
