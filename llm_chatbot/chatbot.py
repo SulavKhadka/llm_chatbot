@@ -1,3 +1,4 @@
+import asyncio
 import json
 import datetime
 from transformers import AutoTokenizer
@@ -49,19 +50,20 @@ class ChatBot:
 
         self.max_message_tokens = 32768
         self.max_reply_msg_tokens = 4096
-        self.max_recurse_depth = 12
+        self.max_recurse_depth = 6
         self.functions = function_tools.get_tools()
         # base_urls = [ "https://openrouter.ai/api/v1", "https://api.together.xyz/v1", "https://api.groq.com/openai/v1", "https://api.hyperbolic.xyz/v1"]
-        self.openai_client = openai.OpenAI(
-            base_url="https://api.together.xyz/v1",
-            api_key=TOGETHER_AI_TOKEN,
+        self.openai_client = openai.AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
         )
-        self.open_router_extra_body = {"provider": {
-                "order": [
-                    "Together"
-                ]
-            }
-        }
+        self.open_router_extra_body = None
+        # {"provider": {
+        #         "order": [
+        #             "Together"
+        #         ]
+        #     }
+        # }
 
         if db_config is None:
             db_config = {
@@ -90,6 +92,7 @@ class ChatBot:
         self.user_id = user_id
         self.chat_id = chat_id
         logger.bind(chat_id=self.chat_id)
+        logger.configure(extra={"chat_id": self.chat_id})
 
         # Database connection
         self.initialize_db(**db_config)
@@ -112,11 +115,14 @@ class ChatBot:
 
         self.outlines_client = models.openai(self.openai_client, OpenAIConfig("self.model"))
 
-    def __call__(self, message):
+    async def __call__(self, message, role="user"):
+        role = "user" if role is None else role
+        # TODO: adjust structure to take in if its a notification or alert from a tool and the notifier
         logger.info("Received_user_message {message}", message=message)
-        self._add_message({"role": "user", "content": message})
+        self._add_message({"role": role, "content": message})
         try:
-            response = self._agent_loop()['content']
+            response = await self._agent_loop()
+            response = response['content']
         except Exception as e:
             logger.error("agent loop failed {error}", error=e)
             response = f"Agent failed to process data, Error: {e}"
@@ -265,7 +271,7 @@ class ChatBot:
                 tools.append((f"{tool_name}: {tool_fn['schema']['function']['description']}\nparameters_schema: {tool_fn['schema']['function']['parameters']}\n\nTool Group Description: {tool_fn['tool_desc']}\n", None))
         self.tool_rag.bulk_insert(tools)
     
-    def _agent_loop(self):
+    async def _agent_loop(self):
         self_recurse = True
         recursion_counter = 0
         processing_tool_call = []
@@ -278,7 +284,7 @@ class ChatBot:
             
             self.rolling_memory()
             try:
-                parsed_response: AssistantResponse = self.execute(tool_suggestions[:5])
+                parsed_response: AssistantResponse = await self.execute(tool_suggestions[:5])
             except Exception as e:
                 logger.debug("failed parsing assistant response {error}", error=e)
                 parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
@@ -304,7 +310,7 @@ class ChatBot:
                     tool_call_responses = []
                     for tool_call in tool_calls:
                         try:
-                            fn_response = self._execute_function_call(tool_call)
+                            fn_response = await self._execute_function_call(tool_call)
                             tool_call_responses.append(fn_response)
                         except Exception as e:
                             tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
@@ -452,19 +458,18 @@ class ChatBot:
         logger.debug("Added_message: {message}, token_count {token_count}, total_tokens {total_tokens} self.total_messages_tokens", message=message, token_count=token_count, total_tokens=self.total_messages_tokens)
         return message_id
 
-    def _get_bot_response_json(self, response_text: str):
+    async def _get_bot_response_json(self, response_text: str):
         logger.debug("response_text_to_json: {response_text}", response_text=response_text)
         response_formatter_messages = [
             {"role": "system", "content": BOT_RESPONSE_FORMATTER_PROMPT},
             {"role": "user", "content": response_text}
         ]
-        response = self.get_llm_response(
+        response = await self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            model_name="google/gemini-flash-1.5-8b",
             extra_body={
                 "response_format": {
                     "type": "json_object",
-                    "schema": AssistantResponse.model_json_schema(),
                 }
             },
         )
@@ -472,8 +477,8 @@ class ChatBot:
         ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
         return ass_resp
 
-    def _parse_results(self, response_text: str):
-        assistant_response = self._get_bot_response_json(response_text)
+    async def _parse_results(self, response_text: str):
+        assistant_response = await self._get_bot_response_json(response_text)
         logger.debug("assistant_response_json {response_json}", response_json=assistant_response.model_dump())
         return assistant_response
 
@@ -506,23 +511,23 @@ class ChatBot:
         logger.info("Extracted_tool_calls {count}", count=len(tool_calls))
         return tool_calls
 
-    def _get_context_filtered_tool_results(self, tool_call: ToolParameter, tool_result):
+    async def _get_context_filtered_tool_results(self, tool_call: ToolParameter, tool_result):
         context_messages = [m for m in self.messages[-2:] if m.get('role', 'system') != 'system']
         logger.debug("context_filtered_tool_result {tool_call_result} {conversation_context}", tool_call_result=tool_result, conversation_context=context_messages)
         response_formatter_messages = [
             {"role": "system", "content": CONTEXT_FILTERED_TOOL_RESULT_PROMPT},
             {"role": "user", "content": f"<conversation_context>{context_messages}</conversation_context>\n<tool_result>{tool_result}</tool_result>"}
         ]
-        response = self.get_llm_response(
+        response = await self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
+            model_name="google/gemini-flash-1.5-8b",
             extra_body={"response_format": {"type": "json_object"}}
         )
         logger.debug("context_filtered_tool_result {reformatted_tool_result}", reformatted_tool_result=response.choices[0].message.content)
 
         return response.choices[0].message.content.replace("\n", " ").replace("\t", "")
 
-    def _execute_function_call(self, tool_call: ToolParameter):
+    async def _execute_function_call(self, tool_call: ToolParameter):
         logger.info("Executing_function_call {tool_call}", tool_call=tool_call)
         if tool_call.name is not None and tool_call.name in self.functions.keys():
             function_to_call = self.functions.get(tool_call.name, {}).get('function', None)
@@ -531,7 +536,7 @@ class ChatBot:
             try:
                 function_response = function_to_call.func(**tool_call.parameters)
                 logger.info("filtering function call response {name} {result}", name=tool_call.name, result=function_response)
-                function_response = self._get_context_filtered_tool_results(tool_call, function_response)
+                function_response = await self._get_context_filtered_tool_results(tool_call, function_response)
                 logger.debug("filtered function call response {name} {result}", name=tool_call.name, result=function_response)
             except Exception as e:
                 function_response = f"Function call errored out. Error: {e}"
@@ -549,7 +554,7 @@ class ChatBot:
             logger.warning("Invalid_function_name {name}", name=tool_call.name)
             return f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
-    def _get_chat_notes(self, message_id: str):
+    async def _get_chat_notes(self, message_id: str):
 
         self.cur.execute("""
                     SELECT notes FROM public.chat_notes
@@ -571,7 +576,7 @@ class ChatBot:
             {"role": "system", "content": CHAT_NOTES_PROMPT},
             {"role": "user", "content": f"extract information from the following conversation:\n<previous_notes>{previous_notes}</previous_notes>\n\n<conversation_transcript>{chat_transcript}</conversation_transcript>"}
         ]
-        completion = self.get_llm_response(messages, model_name=self.model)
+        completion = await self.get_llm_response(messages, model_name=self.model)
 
         logger.debug("parsing_chat_notes_llm_response {response_text}", response_text=completion)
         response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
@@ -600,7 +605,7 @@ class ChatBot:
         """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
         self.conn.commit()
 
-    def _get_session_notes(self, message_id: str):
+    async def _get_session_notes(self, message_id: str):
         self.cur.execute("""
                     SELECT notes FROM public.chat_notes
                     WHERE chat_id=%s
@@ -613,7 +618,7 @@ class ChatBot:
             {"role": "system", "content": CHAT_SESSION_NOTES_PROMPT},
             {"role": "user", "content": f"<chat_session_notes>{latest_session_notes}</chat_session_notes>"}
         ]
-        completion = self.get_llm_response(messages, model_name=self.model)
+        completion = await self.get_llm_response(messages, model_name=self.model)
 
         logger.debug("parsing_session_end_notes_llm_response {response_text}", response_text=completion)
         response_text = utils.sanitize_inner_content(completion.choices[0].message.content)
@@ -643,12 +648,12 @@ class ChatBot:
         self.conn.commit()
 
     def __del__(self):
-        self._get_session_notes(f"{self.chat_id}_final_session_notes")
+        # self._get_session_notes(f"{self.chat_id}_final_session_notes")
         # Close database connection when the object is destroyed
         self.cur.close()
         self.conn.close()
 
-    def execute(self, tool_suggestions, retries: int = 3):
+    async def execute(self, tool_suggestions, retries: int = 3):
         # prefs = "\t-".join([i for i in USER_INFO['preferences']])
         
         while retries > 0:
@@ -683,12 +688,12 @@ Preferences:
             messages = [self.system]
             messages.extend(self.messages)
             logger.info("Executing_LLM_call {message_count}", message_count=len(messages))
-            completion = self.get_llm_response(messages=messages, model_name=self.model)
+            completion = await self.get_llm_response(messages=messages, model_name=self.model)
             logger.debug("LLM_response {response}", response=completion.model_dump())
             logger.info("Token_usage {usage}", usage=completion.usage.model_dump())
 
             try:
-                parsed_response = self._parse_results(completion.choices[0].message.content)
+                parsed_response = await self._parse_results(completion.choices[0].message.content)
                 return parsed_response
             except Exception as e:
                 logger.error("bot response failed {error}", error=e)
@@ -734,12 +739,12 @@ Preferences:
             logger.error("db update exception {error}", error=e)
             raise
 
-    def get_llm_response(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
+    async def get_llm_response(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
         logger.debug("Sending_request_to_LLM {api_provider} {model} {messages}", api_provider=self.openai_client.base_url, model=model_name, messages=messages)
         if "openrouter" in self.openai_client.base_url.host:
             extra_body = extra_body if extra_body is not None else self.open_router_extra_body
         try:
-            chat_completion = self.openai_client.chat.completions.create(
+            chat_completion = await self.openai_client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 max_tokens=self.max_reply_msg_tokens,

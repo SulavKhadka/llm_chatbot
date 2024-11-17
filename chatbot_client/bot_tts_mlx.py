@@ -28,13 +28,7 @@ from mlx_whisper.audio import (
 )
 from llm_chatbot.tts_client import TTSClient
 from secret_keys import PORCUPINE_API_KEY
-
-@dataclass
-class ClientRequest:
-    user_id: str
-    client_type: str
-    message: str
-    user_metadata: dict
+from data_models import ClientRequest
 
 def get_bot_response(user_message: str):
     client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})

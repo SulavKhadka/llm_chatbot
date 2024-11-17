@@ -1,33 +1,18 @@
+import json
 from whisper_online import *
 import sounddevice as sd
 import numpy as np
 from scipy import signal
 import time
-import requests
+from chatbot_server.tts_client import TTSClient
 from uuid import uuid4
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import asdict
 from llm_chatbot import utils
 import torch
-
-@dataclass
-class ClientRequest:
-    user_id: str
-    client_type: str
-    message: str
-    user_metadata: dict
-
-def get_bot_response(user_message: str):
-    client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})
-    try:
-        response = requests.post("http://0.0.0.0:8000/sulav_test/latest/message", json=client_request.__dict__, timeout=120)
-        if response.status_code == 200:
-            return response.text
-        return f"error processing bot response, status code: {response.status_code}"
-    except Exception as e:
-        print(e)
-        return f"error processing bot response, error: {e}"
-    
+from data_models import ClientRequest, MessageResponse
+from queue import Queue, Empty
+import asyncio
 
 class SpeechSegmenter:
     def __init__(
@@ -36,6 +21,7 @@ class SpeechSegmenter:
         silence_duration=1.0,
         sample_rate=16000,
         chunk_duration=1.0,
+        tts_ws_url="ws://0.0.0.0:8880/tts",
     ):
         """
         Initialize speech segmenter with silence detection
@@ -77,12 +63,38 @@ class SpeechSegmenter:
         self.all_segments = []
         self.is_speaking = False
 
-    def is_silence_rms(self, audio_chunk):
-        """Check if an audio chunk is silence based on RMS value"""
-        rms = np.sqrt(np.mean(np.square(audio_chunk)))
-        print(f"rms value for silence: {rms}")
-        return rms < self.silence_threshold
+        # TTS engine
+        self.tts_engine = TTSClient(tts_ws_url)
+
+        self.audio_queue = Queue()
+        self._audio_thread = None
+        self._stop_audio = False
     
+    def _audio_callback(self, indata, frames, time, status):
+        """Callback for sounddevice to handle incoming audio"""
+        if status:
+            print(f"Audio callback status: {status}")
+        # Put audio data in the queue
+        self.audio_queue.put(indata.copy())
+
+    def start_audio_stream(self):
+        """Start the audio stream in non-blocking mode"""
+        self.stream = sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype=np.float32,
+            blocksize=self.chunk_size,
+            callback=self._audio_callback
+        )
+        self.stream.start()
+
+    def stop_audio_stream(self):
+        """Stop the audio stream"""
+        self._stop_audio = True
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+
     def is_silence(self, audio_chunk):
         """Check if an audio chunk is silence based on RMS value"""        
         vad_confidences = []
@@ -104,79 +116,88 @@ class SpeechSegmenter:
         # print(f"chunk_silence_threshold: {chunk_silence_threshold} | max_conf: {vad_confidences.max()} | median: {vad_confidences.median()} | min: {vad_confidences.min()}")
         return chunk_silence_threshold < self.silence_threshold
 
-    async def process_audio(self):
-        """Process incoming audio and detect speech segments"""
-        self.stream.start()
-        print("Listening... (Press Ctrl+C to stop)")
+    async def handle_bot_response(self, response: MessageResponse):
+        print(f"ASSISTANT: {response}")
+        self.tts_engine.stop_playback()
+        for segment in utils.split_markdown_text(response.content):
+            await self.tts_engine.stream_text(segment)
 
+    async def process_audio(self, user_queue: Queue):
+        """Process incoming audio asynchronously"""
+        print("Starting audio processing...")
+        self.start_audio_stream()
+        
         try:
-            while True:
-                # Get audio chunk
-                audio_data, overflowed = self.stream.read(self.chunk_size)
-                if overflowed:
-                    print("Warning: Audio buffer overflowed")
+            while not self._stop_audio:
+                # Get audio data from the queue without blocking the event loop
+                try:
+                    audio_data = await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        self.audio_queue.get, 
+                        True, 
+                        0.06  # 60ms timeout
+                    )
+                except Empty:
+                    await asyncio.sleep(0)
+                    continue
 
-                # Process audio
+                # Process audio chunk
                 audio_chunk = audio_data.flatten()
                 current_time = time.time()
 
                 # Check for silence
-                if self.is_silence(audio_chunk) and tts_engine.is_playing is False:
-                    if (
-                        self.is_speaking
-                        and (current_time - self.last_speech_time)
-                        > self.silence_duration
-                    ):
+                if self.is_silence(audio_chunk) and not self.tts_engine.is_playing:
+                    if (self.is_speaking and 
+                        (current_time - self.last_speech_time) > self.silence_duration):
+                        
                         # End of speech segment detected
                         self.is_speaking = False
                         final_output = self.online.finish()
-                        if final_output[2]:  # If there's text
+                        
+                        if final_output[2]:
                             self.all_segments.append(final_output[2])
 
                         user_input_segment = "".join(self.all_segments)
-                        print("\nSpeech segment complete.\nUser:", user_input_segment)
-                        bot_response = get_bot_response(user_input_segment)
-                        print(f"ASSISTANT: {bot_response}")
-                        tts_engine.stop_playback()
-                        for bot_response_segment in utils.split_markdown_text(bot_response):
-                            await tts_engine.stream_text(bot_response_segment)
+                        print(f"Speech segment complete: {user_input_segment}")
                         
-                        print("\nListening for new segment...")
-
+                        message = ClientRequest(
+                            user_id="",
+                            client_type="voice",
+                            message=user_input_segment,
+                            user_metadata={}
+                        )
+                        
+                        # Put message in queue
+                        await user_queue.put(message)
+                        print("Message sent to queue")
+                        
                         self.all_segments = []
-                        self.online.init()  # Reset for next segment
+                        self.online.init()
                 else:
                     self.last_speech_time = current_time
                     self.is_speaking = True
 
-                # Process with Whisper if we're in a speech segment
+                # Process with Whisper if in speech segment
                 if self.is_speaking:
                     self.online.insert_audio_chunk(audio_chunk)
                     output = self.online.process_iter()
-                    if output[2]:  # If there's text
+                    if output[2]:
                         self.current_segment = output
                         self.all_segments.append(output[2])
-                        print(f"\rCurrent: {output[2]}", end="", flush=True)
+                        print(f"Current segment: {output[2]}")
 
-        except KeyboardInterrupt:
-            print("\n\nStopping audio capture...")
+                # Give other tasks a chance to run
+                await asyncio.sleep(0)
+                
+        except Exception as e:
+            print(f"Error in process_audio: {e}", exc_info=True)
         finally:
-            self.stream.stop()
-            self.stream.close()
-
-            # Process any remaining audio
-            final_output = self.online.finish()
-            if final_output[2]:
-                self.all_segments.append(final_output[2])
-
-            print("\nAll captured segments:")
-            for i, segment in enumerate(self.all_segments, 1):
-                print(f"Segment {i}: {segment[2]}")
+            self.stop_audio_stream()
+            print("Audio processing stopped")
 
     def get_segments(self):
         """Return all captured segments"""
         return self.all_segments
-
 
 async def main():
     # Initialize with custom parameters

@@ -42,10 +42,10 @@ jobs:
             const diff = process.env.DIFF;
             
             const completion = await client.chat.completions.create({
-              model: "meta-llama/llama-3.1-70b-instruct",
+              model: "anthropic/claude-3-5-haiku-20241022",
               messages: [{
                 role: "system",
-                content: "You are a helpful assistant that summarizes git diffs. Be concise and focus on the key changes."
+                content: "You are a helpful assistant that summarizes git diffs. Be concise and focus on the key changes and be sure to give context while being brief. Your output is always in markdown format and only contains the summary, as whatever you return will be pasted into the PR request thread as a comment."
               }, {
                 role: "user",
                 content: `Please summarize these changes:\n${diff}`
