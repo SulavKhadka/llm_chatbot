@@ -71,7 +71,7 @@ def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
         # Check if we have a recent valid session
         if latest_chat_id and created_at:
             # Convert current time to UTC timezone-aware datetime
-            current_time = datetime.now(pytz.UTC)
+            current_time = datetime.now(tz=created_at.tzinfo)
             # Make sure created_at is timezone-aware (assuming it's in UTC)
             if created_at.tzinfo is None:
                 created_at = pytz.UTC.localize(created_at)
@@ -79,7 +79,8 @@ def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
             session_age = current_time - created_at
             if session_age <= MAX_SESSION_AGE:
                 chat_id = latest_chat_id
-        chat_id = None
+        else:
+            chat_id = None
     
     # If we have a specific chat_id or valid latest session, try to load from active_sessions
     if chat_id and user_id in active_sessions and active_sessions[user_id].chat_id == chat_id:

@@ -14,18 +14,6 @@ from data_models import ClientRequest, MessageResponse
 from queue import Queue, Empty
 import asyncio
 
-# def get_bot_response(user_message: str):
-#     client_request = ClientRequest(user_id="sulav", client_type="voice", message=user_message, user_metadata={})
-#     try:
-#         response = requests.post("http://0.0.0.0:8000/sulav_test/latest/message", json=client_request.__dict__, timeout=120)
-#         if response.status_code == 200:
-#             return response.text
-#         return f"error processing bot response, status code: {response.status_code}"
-#     except Exception as e:
-#         print(e)
-#         return f"error processing bot response, error: {e}"
-    
-
 class SpeechSegmenter:
     def __init__(
         self,
@@ -147,9 +135,10 @@ class SpeechSegmenter:
                         None, 
                         self.audio_queue.get, 
                         True, 
-                        0.1  # 100ms timeout
+                        0.06  # 60ms timeout
                     )
                 except Empty:
+                    await asyncio.sleep(0)
                     continue
 
                 # Process audio chunk
@@ -198,7 +187,7 @@ class SpeechSegmenter:
                         print(f"Current segment: {output[2]}")
 
                 # Give other tasks a chance to run
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0)
                 
         except Exception as e:
             print(f"Error in process_audio: {e}", exc_info=True)
