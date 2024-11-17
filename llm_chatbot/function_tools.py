@@ -175,24 +175,21 @@ def take_screenshots(save=False):
     Captures entire monitor areas including windows/desktop. Uses MSS for capture.
     """
     # Create an instance of mss
-    with mss.mss() as sct:
+    with mss.mss(display=':0.0') as sct:
         # List to store PIL images
         screenshots = []
 
         # Iterate through all monitors
         # Skip the first monitor (usually represents the "all in one" virtual monitor)
-        for monitor in sct.monitors[1:]:
+        for monitor_idx, monitor in enumerate(sct.monitors):
             # Capture the screen
             screenshot = sct.grab(monitor)
-
             # Convert to PIL Image
             img = Image.fromarray(np.array(screenshot))
-
             screenshots.append(img)
-
             if save:
                 # Generate a unique filename with timestamp and monitor number
-                filename = f"screenshot_monitor{monitor['monitor']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                filename = f"screenshot_monitor{monitor_idx}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
 
                 # Save the screenshot
                 img.save(filename)
