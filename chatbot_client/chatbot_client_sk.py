@@ -1,14 +1,15 @@
 import asyncio
 import websockets
 import queue
-from dataclasses import dataclass
+from dataclasses import asdict
 from threading import Thread, Event
 from typing import Callable, Dict, Optional, Any, AsyncIterator
 from enum import Enum
 import logging
+import json
 
-from chatbot_client.data_models import ClientRequest, ClientType
 from bot_tts import SpeechSegmenter
+from data_models import ClientType, ClientRequest, MessageResponse
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +20,19 @@ class ConnectionState(Enum):
     RECONNECTING = "reconnecting"
 
 class ChatbotClient:
-    def __init__(self, uri: str, reconnect_interval: float = 5.0):
+    def __init__(self, user_id: str, uri: str, reconnect_interval: float = 5.0):
+        self.user_id = user_id
         self.uri = uri
         self.reconnect_interval = reconnect_interval
-        self.bot_queue: queue.Queue = queue.Queue()
-        self.user_queue: queue.Queue = queue.Queue()
+        self.bot_queue: asyncio.Queue = asyncio.Queue()
+        self.user_queue: asyncio.Queue = asyncio.Queue()
         self.websocket_conn: Optional[websockets.WebSocketClientProtocol] = None
         self.connection_state = ConnectionState.DISCONNECTED
         self.shutdown_event = Event()
         
         self.bot_handlers: Dict[str, Callable] = {}
         self.user_handlers: Dict[str, Callable] = {}
-    
+
     async def _connect_to_server(self) -> None:
         """Establishes WebSocket connection with retry logic."""
         while not self.shutdown_event.is_set():
@@ -45,81 +47,125 @@ class ChatbotClient:
                 self.connection_state = ConnectionState.RECONNECTING
                 await asyncio.sleep(self.reconnect_interval)
 
-    async def incoming_messages_listener(self):
-        while True:
+    async def incoming_messages_listener(self) -> None:
+        """Listens for incoming messages with automatic reconnection."""
+
+        logger.info(f"starting bot websocket conn listener...")
+        while not self.shutdown_event.is_set():
             try:
+                if not self.websocket_conn:
+                    await self._connect_to_server()
+                    continue
+                
                 incoming_bot_message = await self.websocket_conn.recv()
-                self.bot_queue.put(incoming_bot_message)
-            except websockets.exceptions.ConnectionClosed as e:
-                print(f"Failed to receive message: Connection closed: {e}")
-                break
+                await self._process_bot_message(incoming_bot_message)
+            except websockets.exceptions.ConnectionClosed:
+                logger.warning("Connection closed, attempting to reconnect...")
+                self.websocket_conn = None
+                await asyncio.sleep(self.reconnect_interval)
+            except Exception as e:
+                logger.error(f"Error in incoming message listener: {e}")
+                await asyncio.sleep(1)
 
-    async def outgoing_messages_listener(self):
-        while True:
-            outgoing_user_message = self.user_queue.get()
-            if outgoing_user_message:
-                try:
-                    await self.websocket_conn.send(outgoing_user_message)
-                except websockets.exceptions.ConnectionClosed as e:
-                    print(f"Failed to send message: Connection closed: {e}")
-                    raise e
+    async def _process_bot_message(self, message: str) -> None:
+        """Processes incoming bot messages with error handling."""
+        try:
+            parsed_message = MessageResponse(**json.loads(message))
+            client_type = parsed_message.client_type
+            handler = self.bot_handlers.get(client_type)
+            
+            if handler:
+                await handler(parsed_message)
+            else:
+                logger.warning(f"No handler found for client type: {client_type}")
+        except json.JSONDecodeError:
+            logger.error("Failed to parse bot message")
+        except Exception as e:
+            logger.error(f"Error processing bot message: {e}")
 
-    async def bot_message_handler(self):
-        """Handles messages from the bot. The handlers written for it should be a one way function as this doesnt react to the function response"""
-        while True:
-            bot_message = self.bot_queue.get()
-            if bot_message:
-                print(f"Bot message: {bot_message}")
-                handler_function = self.bot_handlers.get(ClientRequest.client_type)
-                if handler_function:
-                    try:
-                        await handler_function(bot_message)
-                    except Exception as e:
-                        print(f"Error in bot message handler: {e}")
+    async def outgoing_messages_listener(self) -> None:
+        """Handles outgoing messages with backpressure."""
+
+        logger.info(f"starting user queue listener...")
+        while not self.shutdown_event.is_set():
+            # logger.debug("OML_PING")
+            try:
+                message: ClientRequest = await self.user_queue.get()
+                message.user_id = self.user_id # injecting user_id, there is gotta be a better way 
+                if self.websocket_conn and self.connection_state == ConnectionState.CONNECTED:
+                    await self.websocket_conn.send(json.dumps(asdict(message)))
                 else:
-                    print(f"No handler function found for bot message client type: {bot_message.client_type}")
-    
-    async def user_message_handler(self):
-        """Handles messages from the user. Should accept queue as an argument"""
-        # run the handlers in the background
-        for user_handler in self.user_handlers.values():
-            asyncio.create_task(user_handler(self.user_queue))
+                    # Requeue message if not connected
+                    await self.user_queue.put(message)
+                    await asyncio.sleep(0.1)
+            except queue.Empty:
+                logger.debug("user_queue: its emtpy rn")
+                continue
+            except Exception as e:
+                logger.debug(f"Error in outgoing message listener: {e}")
+                await asyncio.sleep(0.1)
+        logger.debug(f"not sure what happened {self.shutdown_event.is_set()}")
+
+    def register_handler(self, handler_type: str, handler_function: Callable) -> None:
+        """Registers message handlers with type checking."""
+        if not asyncio.iscoroutinefunction(handler_function):
+            raise ValueError("Handler function must be async")
         
-        # wait for all the user handlers to finish
-        await asyncio.gather(*self.user_handlers.values())
+        if handler_type in [ClientType.VOICE, ClientType.TERMINAL, ClientType.CHAT]:
+            self.bot_handlers[handler_type.value] = handler_function
+        elif handler_type == ClientType.USER:
+            self.user_handlers[handler_type.value] = handler_function
+        else:
+            raise ValueError(f"Unknown handler type: {handler_type}")
 
-    def register_handler(self, client_type: ClientType, handler_function: Callable):
-        if client_type == ClientType.VOICE:
-            self.bot_handlers[client_type] = handler_function
-        elif client_type == ClientType.CHAT:
-            self.user_handlers[client_type] = handler_function
+    async def start(self) -> None:
+        """Starts the client with proper cleanup."""
+        try:
+            await self._connect_to_server()
+            
+            tasks = [
+                asyncio.create_task(self.incoming_messages_listener(), name="incoming_listener"),
+                asyncio.create_task(self.outgoing_messages_listener(), name="outgoing_listener")
+            ]
+            
+            # Add user handler tasks
+            for handler_name, handler in self.user_handlers.items():
+                logger.info(f"Starting handler: {handler_name}")
+                tasks.append(asyncio.create_task(
+                    handler(self.user_queue),
+                    name=f"handler_{handler_name}"
+                ))
+            
+            # Debug logging for active tasks
+            logger.info(f"Running tasks: {[task.get_name() for task in tasks]}")
+            
+            await asyncio.gather(*tasks)
+        except Exception as e:
+            logger.error(f"Error in client: {e}", exc_info=True)
+        finally:
+            logger.info("Cleaning up...")
+            await self.cleanup()
 
-    async def start(self):
-        # initialise websocket connection to server
-        await self._connect_to_server()
+    async def cleanup(self) -> None:
+        """Performs cleanup operations."""
+        self.shutdown_event.set()
+        if self.websocket_conn:
+            await self.websocket_conn.close()
         
-        # run the handlers in a separate thread
-        self.bot_message_handler_thread = Thread(target=self.bot_message_handler, daemon=True)
-        self.bot_message_handler_thread.start()
-        
-        # run the user handler functions in a separate thread
-        self.user_message_handler_thread = Thread(target=self.user_message_handler, daemon=True)
-        self.user_message_handler_thread.start()
-
-        # split recv to an async while loop and send to an async while loop
-        # they send out or listen to messages from two queues (bot_queue, user_queue)
-        await asyncio.gather(self.incoming_messages_listener(), self.outgoing_messages_listener())
-
-        # wait for the threads to finish
-        self.bot_message_handler_thread.join()
-        self.user_message_handler_thread.join()
-
-
-
+        # Clear queues
+        while not self.bot_queue.empty():
+            self.bot_queue.get_nowait()
+        while not self.user_queue.empty():
+            self.user_queue.get_nowait()
 
 if __name__ == "__main__":
-    client = ChatbotClient("ws://localhost:8000/ws")
-
+    # Configure detailed logging
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    client = ChatbotClient("sulav_test", "ws://localhost:8000/sulav_test/ws")
+    
     # Voice handler
     segmenter = SpeechSegmenter(
         silence_threshold=0.013,  # Adjust based on your microphone and environment
@@ -128,6 +174,14 @@ if __name__ == "__main__":
         chunk_duration=2.0,  # Process in 0.5 second chunks
         tts_ws_url="ws://0.0.0.0:8880/tts",
     )
-    client.register_handler(ClientType.VOICE, segmenter.process_audio)
+    client.register_handler(ClientType.VOICE, segmenter.handle_bot_response)
+    client.register_handler(ClientType.USER, segmenter.process_audio)
 
-    client.start()
+    # Run the client
+    try:
+        asyncio.run(client.start())
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+    finally:
+        # Ensure proper cleanup
+        segmenter.stop_audio_stream()
