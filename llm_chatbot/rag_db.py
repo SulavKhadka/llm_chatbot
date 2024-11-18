@@ -150,6 +150,7 @@ class VectorSearch:
         Returns:
             List of dicts containing id, content, metadata, and similarity score
         """
+        print(f"querying {self.table_name} for query: {query_text}")
         query_embedding = self._encode_text(query_text, embed_type="query")
         
         with psycopg2.connect(self.conn_string) as conn:
@@ -159,11 +160,14 @@ class VectorSearch:
                     FROM {self.table_name};
                 """)
                 tool_rows = cur.fetchall()
-                query_to_tools_sim = torch.cosine_similarity(
-                    torch.Tensor(query_embedding),
-                    torch.Tensor([json.loads(i[2]) for i in tool_rows])
-                )
-                top_k_tools = query_to_tools_sim.topk(top_k)
+
+                top_k_tools = torch.topk(torch.tensor([]), 0)
+                if len(tool_rows) > 0:
+                    query_to_tools_sim = torch.cosine_similarity(
+                        torch.Tensor(query_embedding),
+                        torch.Tensor([json.loads(i[2]) for i in tool_rows])
+                    )
+                    top_k_tools = query_to_tools_sim.topk(min(top_k, query_to_tools_sim.shape[0]))
                 
                 results = []
                 for i in range(len(top_k_tools.indices)):
