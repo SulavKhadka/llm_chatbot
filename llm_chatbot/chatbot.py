@@ -270,11 +270,12 @@ class ChatBot:
         """
         # Query to get all messages for this chat session
         self.cur.execute("""
-            SELECT id, chat_id, role, content, token_count, is_purged, created_at, updated_at
-            FROM chat_messages 
-            WHERE chat_id = %s
+            SELECT chat_messages.*
+            FROM chat_messages
+            JOIN chat_sessions on chat_messages.chat_id = chat_sessions.chat_id
+            WHERE chat_sessions.user_id = %s
             ORDER BY created_at, id
-        """, (self.chat_id,))
+        """, (self.user_id,))
         
         # Format messages for RAG insertion, excluding system messages
         rag_entries = []
@@ -285,7 +286,7 @@ class ChatBot:
                 rag_entries.append((formatted_message, None))  # None for metadata as per VectorSearch.bulk_insert
         
         # Bulk insert into conversation_rag if we have entries
-        if rag_entries:
+        if len(rag_entries) > 0:
             self.conversation_rag.bulk_insert(rag_entries)
             logger.info("Loaded {count} messages into conversation RAG", count=len(rag_entries))
         else:

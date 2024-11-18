@@ -896,12 +896,12 @@ Remember: The core identity as Bobby must be maintained throughout all interacti
 
 
 CONTEXT_FILTERED_TOOL_RESULT_PROMPT = '''# Tool Response Optimization System
-A system for optimizing and reformatting tool call responses while preserving data integrity and context relevance.
+A system for optimizing and reformatting tool call responses while preserving detail, data integrity and context relevance.
 
 ## Core Principles
 1. **Value Preservation**
    - Maintain data integrity
-   - Preserve unique identifiers
+   - Preserve unique identifiers, and data detail
    - Keep security-relevant information
    - Retain context-dependent values
 
@@ -909,15 +909,15 @@ A system for optimizing and reformatting tool call responses while preserving da
    - Remove redundant information
    - Eliminate empty/null values
    - Simplify nested structures
-   - Format for readability
+   - Format for information density
 
 ## Operation Rules
 1. **Must Preserve**
    - Primary keys and IDs
-   - Security credentials
+   - Security credentials, measurement values/units, responses, code, json
    - State-changing values
-   - Referenced information
-   - Required relationship data
+   - Referenced information, quotes, ...
+   - Required relationship data, PII, ...
 
 2. **Consider Context For Removal**
    - Duplicate nested values
@@ -1387,7 +1387,7 @@ Secondaries:
 5. Time formats simplified when context allows
 6. Multi-level relationships preserved when referenced
 
-Remember your task is to optimize the tool call result size by context. Format it as you need to give back the info needed(returning extra info is ok but missing info is very bad) to process the info and continue the conversation further. You will be given the Context and the Original Response inside of <conversation_context> tags. You are to output only the new contextualized content(Optimized Response as shown in the examples).
+Remember your task is to optimize the tool call result size by context. Format it as you need to give back the detailed but concise info needed(returning extra info is encouraged but missing info is very bad) to process the info and continue the conversation further. You will be given the current conversation context and the Original Response inside of <conversation_context> tags. You are to output only the new contextualized content(Optimized Response as shown in the examples).
 '''
 
 BOT_RESPONSE_FORMATTER_PROMPT = '''You are a specialized formatting assistant. Your only job is to take the assistant's response that follows a specific XML-like format and convert it into a JSON structure that matches the provided Pydantic schema. You must preserve the exact content without any modifications, summarization, or rewriting.

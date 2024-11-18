@@ -1,100 +1,99 @@
-import os
+from typing import Dict, List, Optional
 import requests
-import json
-from typing import Dict, List, Any, Optional
-from secret_keys import BRAVE_SEARCH_API_KEY
+import inspect
 
-# Configuration
-API_KEY = BRAVE_SEARCH_API_KEY
+class BraveSearchTool:
+    """Agent tool for web search via Brave Search API. Supports general web search,
+    news filtering, and result customization. Results include titles, URLs, and 
+    descriptions. Use search() for general queries, search_news() for recent content."""
 
-BASE_URL = "https://api.search.brave.com/res/v1/web/search"
-DEFAULT_PARAMS = {
-    "country": "us",
-    "safesearch": "moderate",
-    "search_lang": "en",
-    "ui_lang": "en-US",
-    "count": 10
-}
+    def __init__(self, api_key: str):
+        """Initialize with Brave Search API key."""
+        self._api_key = api_key
+        self._base_url = "https://api.search.brave.com/res/v1/web/search"
+        self._default_params = {
+            "country": "us",
+            "safesearch": "moderate",
+            "search_lang": "en",
+            "ui_lang": "en-US"
+        }
 
-def web_search_api(query: str, **kwargs) -> Dict[str, Any]:
-    """
-    Perform a web search using the Brave Search API.
+    def _get_available_methods(self) -> List[Dict[str, str]]:
+        """
+        Returns a list of all public methods in the class along with their docstrings.
+        
+        Returns:
+            List of dictionaries containing method names and their documentation.
+            Each dictionary has:
+                - name: Method name
+                - docstring: Method documentation
+                - signature: Method signature
+        """
+        methods = []
+        for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
+            # Skip private methods (those starting with _)
+            if not name.startswith('_'):
+                # Get the method's signature
+                signature = str(inspect.signature(method))
+                # Get the method's docstring, clean it up and handle None case
+                docstring = inspect.getdoc(method) or "No documentation available"
+                
+                methods.append({
+                    "name": name,
+                    "docstring": docstring,
+                    "signature": f"{name}{signature}",
+                    "func": method
+                })
+        
+        return sorted(methods, key=lambda x: x["name"])
 
-    Args:
-        query (str): The search query.
-        **kwargs: Additional parameters to customize the search.
+    def _make_request(self, params: Dict) -> Dict:
+        """Make API request with error handling."""
+        headers = {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": self._api_key
+        }
+        
+        try:
+            response = requests.get(self._base_url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            raise Exception(f"Search request failed: {e}")
 
-    Returns:
-        Dict[str, Any]: The parsed JSON response from the API.
-    """
-    params = DEFAULT_PARAMS.copy()
-    params.update(kwargs)
-    params["q"] = query
+    def _format_results(self, results: Dict, count: int) -> List[Dict[str, str]]:
+        """Extract and format web results."""
+        formatted = []
+        if "web" in results and "results" in results["web"]:
+            for result in results["web"]["results"][:count]:
+                formatted.append({
+                    "title": result.get("title", ""),
+                    "url": result.get("url", ""),
+                    "description": result.get("description", "")
+                })
+        return formatted
 
-    headers = {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "X-Subscription-Token": API_KEY
-    }
+    def search(self, query: str, count: int = 5) -> List[Dict[str, str]]:
+        """Search web pages. Usage: query='specific search terms', count=1-10 for results.
+        Returns: [{"title": str, "url": str, "description": str}, ...] ordered by relevance."""
+        params = {
+            **self._default_params,
+            "q": query,
+            "count": min(max(1, count), 10)
+        }
+        results = self._make_request(params)
+        return self._format_results(results, count)
 
-    try:
-        response = requests.get(BASE_URL, params=params, headers=headers)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        print(f"Error occurred while making the request: {e}")
-        return {}
-
-def format_results(results: Dict[str, Any]) -> List[Dict[str, str]]:
-    """
-    Format the search results for better readability.
-
-    Args:
-        results (Dict[str, Any]): The raw API response.
-
-    Returns:
-        List[Dict[str, str]]: A list of formatted search results.
-    """
-    formatted_results = []
-    if "web" in results and "results" in results["web"]:
-        for result in results["web"]["results"]:
-            formatted_results.append({
-                "title": result.get("title", ""),
-                "url": result.get("url", ""),
-                "description": result.get("description", "")
-            })
-    return formatted_results
-
-def display_results(results: List[Dict[str, str]]):
-    """
-    Display the formatted search results.
-
-    Args:
-        results (List[Dict[str, str]]): The formatted search results.
-    """
-    for i, result in enumerate(results, 1):
-        print(f"\n--- Result {i} ---")
-        print(f"Title: {result['title']}")
-        print(f"URL: {result['url']}")
-        print(f"Description: {result['description']}")
-
-def main():
-    """
-    Main function to run the web search script.
-    """
-    while True:
-        query = input("\nEnter your search query (or 'quit' to exit): ").strip()
-        if query.lower() == 'quit':
-            break
-
-        results = web_search_api(query)
-        formatted_results = format_results(results)
-        display_results(formatted_results)
-
-        if "mixed" in results:
-            print("\nOther result types available:")
-            for result_type in results["mixed"].get("main", []):
-                print(f"- {result_type['type']}")
-
-if __name__ == "__main__":
-    main()
+    def _search_news(self, query: str, count: int = 5, hours: Optional[int] = 24) -> List[Dict[str, str]]:
+        """Search recent news. Usage: query='news topic', count=1-10, hours=past time window.
+        Returns: [{"title": str, "url": str, "description": str}, ...] ordered by recency
+        and relevance. Set hours for time window (24=day, 168=week)."""
+        params = {
+            **self._default_params,
+            "q": f"{query} before:{hours}h",
+            "count": min(max(1, count), 10),
+            "news": "true"
+        }
+        results = self._make_request(params)
+        return self._format_results(results, count)

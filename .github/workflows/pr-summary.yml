@@ -16,18 +16,22 @@ jobs:
       - name: Get PR diff
         id: get-diff
         run: |
-          if [ "${{ github.event.action }}" = "opened" ]; then
-            # For newly opened PRs, get the full diff
-            git fetch origin ${{ github.base_ref }}
-            DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
-          else
-            # For synchronized PRs, get only the diff of new changes
-            git fetch origin ${{ github.event.before }}
-            DIFF=$(git diff ${{ github.event.before }}...${{ github.event.after }})
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.pull_request.base.sha }}" != "" ]; then
+            if [ "${{ github.event.before }}" = "0000000000000000000000000000000000000000" ] || [ "${{ github.event.before }}" = "" ]; then
+              # For newly opened PRs, get the full diff
+              git fetch origin ${{ github.base_ref }}
+              DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+              echo "SUMMARY_TYPE=Initial PR Changes" >> $GITHUB_ENV
+            else
+              # For synchronized PRs, get only the diff of new changes
+              git fetch origin ${{ github.event.before }}
+              DIFF=$(git diff ${{ github.event.before }}...${{ github.sha }})
+              echo "SUMMARY_TYPE=Recent Changes" >> $GITHUB_ENV
+            fi
+            echo "DIFF<<EOF" >> $GITHUB_ENV
+            echo "$DIFF" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
           fi
-          echo "DIFF<<EOF" >> $GITHUB_ENV
-          echo "$DIFF" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
 
       - name: Install OpenAI
         run: npm install openai@^4.0.0
