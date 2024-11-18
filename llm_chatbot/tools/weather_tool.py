@@ -1,26 +1,49 @@
-import os
-from typing import Dict, List, Optional, Union
-from datetime import datetime
 import requests
-from geopy.geocoders import Nominatim
+from typing import Dict, Optional, List
+from datetime import datetime
 import inspect
 
 class WeatherTool:
     """
-    A streamlined interface for OpenWeatherMap API providing actionable weather data methods.
-    Each public method represents a distinct tool capability that can be used by an agent.
+    A streamlined weather data interface using the Tomorrow.io API.
+    Provides current conditions and forecasts with automated weather code translation.
     """
     
     def __init__(self, api_key: str):
         """
-        Initialize the Weather tool with API key.
+        Initialize WeatherTool with Tomorrow.io API key.
         
         Args:
-            api_key: OpenWeatherMap API key
+            api_key: Tomorrow.io API key
         """
         self._api_key = api_key
-        self._base_url = 'https://api.openweathermap.org/data/2.5'
-        self._geolocator = Nominatim(user_agent="weather_tool")
+        self._base_url = "https://api.tomorrow.io/v4/weather"
+        self._weather_codes = {
+            0: "Unknown",
+            1000: "Clear, Sunny",
+            1100: "Mostly Clear",
+            1101: "Partly Cloudy",
+            1102: "Mostly Cloudy",
+            1001: "Cloudy",
+            2000: "Fog",
+            2100: "Light Fog",
+            4000: "Drizzle",
+            4001: "Rain",
+            4200: "Light Rain",
+            4201: "Heavy Rain",
+            5000: "Snow",
+            5001: "Flurries",
+            5100: "Light Snow",
+            5101: "Heavy Snow",
+            6000: "Freezing Drizzle",
+            6001: "Freezing Rain",
+            6200: "Light Freezing Rain",
+            6201: "Heavy Freezing Rain",
+            7000: "Ice Pellets",
+            7101: "Heavy Ice Pellets",
+            7102: "Light Ice Pellets",
+            8000: "Thunderstorm"
+        }
 
     def _get_available_methods(self) -> List[Dict[str, str]]:
         """
@@ -51,132 +74,149 @@ class WeatherTool:
         
         return sorted(methods, key=lambda x: x["name"])
 
-    def _make_request(self, endpoint: str, params: Dict = None) -> Dict:
-        """Make an API request to OpenWeatherMap."""
-        if params is None:
-            params = {}
-        
-        params['appid'] = self._api_key
+    def _make_request(self, endpoint: str, params: Dict) -> Dict:
+        """Make API request to Tomorrow.io."""
         url = f"{self._base_url}/{endpoint}"
+        params['apikey'] = self._api_key
         
         try:
             response = requests.get(url, params=params)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as error:
-            raise Exception(f"API request failed: {error}")
+            raise Exception(f"Weather API request failed: {error}")
 
-    def _get_coordinates(self, location: str) -> tuple:
-        """Convert location string to coordinates using geocoding."""
-        try:
-            location_data = self._geolocator.geocode(location)
-            if location_data is None:
-                raise ValueError(f"Could not find coordinates for location: {location}")
-            return location_data.latitude, location_data.longitude
-        except Exception as error:
-            raise Exception(f"Geocoding failed: {error}")
+    def _translate_weather_code(self, code: int) -> str:
+        """Translate numeric weather code to human-readable description."""
+        return self._weather_codes.get(code, "Unknown")
 
-    def _format_weather_data(self, weather_data: Dict) -> Dict:
-        """Format raw weather data into a more user-friendly structure."""
-        return {
-            'location': weather_data.get('name'),
-            'country': weather_data.get('sys', {}).get('country'),
-            'temperature': weather_data.get('main', {}).get('temp'),
-            'feels_like': weather_data.get('main', {}).get('feels_like'),
-            'humidity': weather_data.get('main', {}).get('humidity'),
-            'pressure': weather_data.get('main', {}).get('pressure'),
-            'description': weather_data.get('weather', [{}])[0].get('description'),
-            'wind_speed': weather_data.get('wind', {}).get('speed'),
-            'wind_direction': weather_data.get('wind', {}).get('deg'),
-            'clouds': weather_data.get('clouds', {}).get('all'),
-            'rain_1h': weather_data.get('rain', {}).get('1h'),
-            'snow_1h': weather_data.get('snow', {}).get('1h'),
-            'timestamp': datetime.fromtimestamp(weather_data.get('dt', 0))
-        }
+    def _process_weather_data(self, data: Dict) -> Dict:
+        """Process weather values to include human-readable descriptions."""
+        if 'weatherCode' in data:
+            data['weatherCondition'] = self._translate_weather_code(data['weatherCode'])
+        return data
 
-    def get_current_weather(self, location: str, units: str = 'metric', language: str = 'en') -> Dict:
+    def _process_timeline(self, timeline: list) -> list:
+        """Process a timeline of weather data to include descriptions."""
+        for period in timeline:
+            if 'values' in period:
+                period['values'] = self._process_weather_data(period['values'])
+        return timeline
+
+    def get_current_weather(self, location: str, units: str = 'metric') -> Dict:
         """
-        Get current weather conditions for a location.
+        Get current weather conditions.
         
         Args:
-            location: City name or "City,CountryCode" (e.g. "London,UK")
-            units: Units of measurement ('standard' for Kelvin, 'metric' for Celsius, 'imperial' for Fahrenheit)
-            language: Language code for weather descriptions (e.g. 'en', 'es', 'fr')
+            location: Location identifier - can be:
+                     - Coordinates (e.g., "42.3478,-71.0466")
+                     - City name (e.g., "new york")
+                     - US zip (e.g., "10001")
+                     - UK postcode (e.g., "SW1")
+            units: Unit system ('metric' or 'imperial')
             
         Returns:
-            Dictionary containing current weather data including:
-            - temperature and feels like temperature in requested units
-            - humidity percentage
-            - pressure in hPa
-            - weather description in requested language
-            - wind speed (m/s for metric, mph for imperial)
-            - cloudiness percentage
-            - precipitation data if present
-        """
-        lat, lon = self._get_coordinates(location)
-        
-        params = {
-            'lat': lat,
-            'lon': lon,
-            'units': units,
-            'lang': language
-        }
-        
-        data = self._make_request('weather', params)
-        return self._format_weather_data(data)
-
-    def get_forecast(self, location: str, forecast_days: int = 5, units: str = 'metric', language: str = 'en') -> Dict:
-        """
-        Get weather forecast for a location.
-        
-        Args:
-            location: City name or "City,CountryCode" (e.g. "London,UK")
-            forecast_days: Number of days (1-16) for forecast
-            units: Units of measurement ('standard' for Kelvin, 'metric' for Celsius, 'imperial' for Fahrenheit)
-            language: Language code for weather descriptions (e.g. 'en', 'es', 'fr')
-            
-        Returns:
-            Dictionary containing daily forecast data including:
-            - daily temperature ranges
-            - precipitation probability
-            - weather conditions
+            Dictionary containing:
+            - temperature and feels_like temperature
+            - humidity
             - wind speed and direction
-            - humidity and pressure
+            - precipitation probability and intensity
+            - cloud cover, UV index, visibility
+            - weather condition (human-readable)
+            Plus location details and timestamp
         """
-        if not 1 <= forecast_days <= 16:
-            raise ValueError("Forecast days must be between 1 and 16")
-            
-        lat, lon = self._get_coordinates(location)
-        
         params = {
-            'lat': lat,
-            'lon': lon,
-            'units': units,
-            'lang': language,
-            'cnt': forecast_days
+            'location': location,
+            'units': units
         }
         
-        return self._make_request('forecast/daily', params)
+        data = self._make_request('realtime', params)
+        
+        if not data.get('data'):
+            raise Exception("No weather data received")
+            
+        processed_data = {
+            'weather': self._process_weather_data(data['data']['values']),
+            'location': data['location'],
+            'timestamp': data['data']['time']
+        }
+        
+        return processed_data
 
-    def get_air_quality(self, location: str) -> Dict:
+    def get_forecast(self, location: str, timesteps: str = '1h', days: int = 5, units: str = 'metric') -> Dict:
         """
-        Get current air quality data for a location.
+        Get weather forecast with specified time steps.
         
         Args:
-            location: City name or "City,CountryCode" (e.g. "London,UK")
+            location: Location identifier (same formats as get_current_weather)
+            timesteps: Time resolution - '1h' for hourly or '1d' for daily
+            days: Number of days to forecast:
+                  - For hourly: 1-5 days (max 120 hours)
+                  - For daily: 1-5 days
+            units: Unit system ('metric' or 'imperial')
             
         Returns:
-            Dictionary containing air quality data including:
-            - Air Quality Index (AQI)
-            - Individual pollutant levels (CO, NO2, O3, SO2, PM2.5, PM10)
-            - Qualitative air quality assessment
-            - Timestamp of measurement
+            Dictionary containing timeline of forecasts with:
+            - temperature range and feels_like
+            - precipitation probability and intensity
+            - wind conditions
+            - cloud cover, humidity
+            - weather condition (human-readable)
+            Plus location information
         """
-        lat, lon = self._get_coordinates(location)
-        
+        if timesteps not in ['1h', '1d']:
+            raise ValueError("Timesteps must be '1h' for hourly or '1d' for daily")
+            
+        if not 1 <= days <= 5:
+            raise ValueError("Days must be between 1 and 5")
+            
         params = {
-            'lat': lat,
-            'lon': lon
+            'location': location,
+            'units': units,
+            'timesteps': [timesteps]
         }
         
-        return self._make_request('air_pollution', params)
+        data = self._make_request('forecast', params)
+        
+        if not data.get('timelines'):
+            raise Exception("No forecast data received")
+        
+        # Calculate number of periods based on timestep
+        periods = days * (24 if timesteps == '1h' else 1)
+        
+        timeline_key = 'hourly' if timesteps == '1h' else 'daily'
+        timeline = data['timelines'][timeline_key][:periods]
+        
+        return {
+            'forecast': self._process_timeline(timeline),
+            'location': data['location']
+        }
+
+    def _get_field_units(self, field: str, unit_system: str = 'metric') -> str:
+        """Get the units for a specific weather field."""
+        metric_units = {
+            'temperature': 'Celsius',
+            'windSpeed': 'm/s',
+            'windGust': 'm/s',
+            'precipitationIntensity': 'mm/hr',
+            'snowAccumulation': 'mm',
+            'visibility': 'km',
+            'pressure': 'hPa',
+            'cloudBase': 'km',
+            'cloudCeiling': 'km'
+        }
+        
+        imperial_units = {
+            'temperature': 'Fahrenheit',
+            'windSpeed': 'mph',
+            'windGust': 'mph',
+            'precipitationIntensity': 'in/hr',
+            'snowAccumulation': 'in',
+            'visibility': 'mi',
+            'pressure': 'inHg',
+            'cloudBase': 'mi',
+            'cloudCeiling': 'mi'
+        }
+        
+        units = metric_units if unit_system == 'metric' else imperial_units
+        return units.get(field, 'N/A')

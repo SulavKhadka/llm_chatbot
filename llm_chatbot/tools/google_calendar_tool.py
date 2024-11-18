@@ -141,7 +141,7 @@ class GoogleCalendarTool:
         if time_min is None:
             time_min = datetime.now(timezone.utc)
         elif isinstance(time_min, str):
-            time_min = datetime.fromisoformat(time_min)
+            time_min = datetime.fromisoformat(time_min).astimezone(timezone.utc)
             assert isinstance(time_min, datetime)
             
         events_result = self.service.events().list(

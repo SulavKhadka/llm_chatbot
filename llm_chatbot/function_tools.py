@@ -12,13 +12,14 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_community.tools.pubmed.tool import PubmedQueryRun
 from langchain_community.utilities import ArxivAPIWrapper
 from secret_keys import (
-    OPENWATHERMAP_API_TOKEN,
+    TOMORROW_IO_WEATHER_API_TOKEN,
     SPOTIFY_CLIENT_ID,
     SPOTIFY_CLIENT_SECRET,
     HUE_USER,
     HUE_BRIDGE_IP,
+    BRAVE_SEARCH_API_KEY,
+    OPENROUTER_API_KEY
 )
-from llm_chatbot.tools.web_search import web_search_api
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
 from llm_chatbot.tools.spotify_control import SpotifyTool
 from llm_chatbot.tools.philips_hue_tool import PhilipsHueTool
@@ -26,15 +27,14 @@ from llm_chatbot.tools.notifier_tool import NotifierTool
 from llm_chatbot.tools.google_calendar_tool import GoogleCalendarTool
 from llm_chatbot.tools.gmail_tool import GmailTool
 from llm_chatbot.tools.yt_dlp_tool import YtDLPTool
-from llm_chatbot.tools.weather_tool import WeatherTool
-
+from llm_chatbot.tools.weather_tool_old import WeatherTool
+from llm_chatbot.tools.web_search import BraveSearchTool
 import numpy as np
 from PIL import Image
 import os
 import json
 from typing import Union, Dict
 import openai
-from secret_keys import OPENROUTER_API_KEY
 
 @tool
 def open_image_file(filepath: str):
@@ -301,15 +301,15 @@ def get_tools():
     session = interpreter.create_session()
     notifier_tool = NotifierTool()
 
-    weather_tool = WeatherTool(api_key=OPENWATHERMAP_API_TOKEN)
+    weather_tool = WeatherTool(api_key=TOMORROW_IO_WEATHER_API_TOKEN)
     yt_dlp_tool = YtDLPTool(output_path="./yt_dlp_output/")
     gmail_tool = GmailTool(credentials_path="./llm_chatbot/tools/gmail_client_creds.json", token_path='./llm_chatbot/tools/gmail_client_token.json')
     calendar_tool = GoogleCalendarTool(credentials_path="./llm_chatbot/tools/google_calendar_creds.json", token_path='./llm_chatbot/tools/google_calendar_token.json')
     spotify_tool = SpotifyTool(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
+    web_search_tool = BraveSearchTool(api_key=BRAVE_SEARCH_API_KEY)
     
     tools = [
-        web_search,
         take_screenshots,
         search_arxiv,
         open_image_file,
@@ -320,7 +320,8 @@ def get_tools():
         gmail_tool,
         calendar_tool,
         yt_dlp_tool,
-        weather_tool
+        weather_tool,
+        web_search_tool
     ]
 
     tool_dict = {}
