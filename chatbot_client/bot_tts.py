@@ -13,6 +13,9 @@ import torch
 from data_models import ClientRequest, MessageResponse
 from queue import Queue, Empty
 import asyncio
+import copy
+import pvporcupine
+from secret_keys import PORCUPINE_API_KEY
 
 class SpeechSegmenter:
     def __init__(
@@ -42,6 +45,8 @@ class SpeechSegmenter:
                               model='silero_vad',
                               force_reload=True)
         self.vad_chunk_size = 512 if self.sample_rate == 16000 else 256
+
+        self.wake_word_engine = pvporcupine.create(access_key=PORCUPINE_API_KEY, keywords=['porcupine'])
 
         # Initialize ASR components
         self.asr = FasterWhisperASR("en", "distil-large-v3")
@@ -106,8 +111,21 @@ class SpeechSegmenter:
                 vad_chunk[:len(audio_chunk)-i] = audio_chunk[i:i+self.vad_chunk_size]
             else:
                 vad_chunk = audio_chunk[i:i+self.vad_chunk_size]
+
+            if self.wake_word_engine.process((vad_chunk * 32767).astype(np.int16)) >= 0:
+                if not self.is_speaking:
+                    new_audio_chunk = np.zeros(len(audio_chunk), dtype=np.float32)
+                    new_audio_chunk[i: len(audio_chunk)] = audio_chunk[i: len(audio_chunk)]
+                    audio_chunk = copy.deepcopy(new_audio_chunk)
+                    self.all_segments = []
+
+                    self.is_speaking = True
+                    return False
             
-            vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            if self.is_speaking:
+                vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            else:
+                vad_confidences.append(0.0)
         
         vad_confidences = torch.tensor(vad_confidences)
         smas = np.convolve(vad_confidences, np.ones(5), 'valid') / 5

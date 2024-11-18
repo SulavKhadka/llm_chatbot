@@ -342,12 +342,16 @@ Your output should always be valid JSON in this format:
         base_url="https://openrouter.ai/api/v1"
     )
     prompt_completion = openai_client.completions.create(
-        model="meta-llama/llama-3.1-70b-instruct",
+        model="google/gemini-flash-1.5-8b",
         prompt=prompt,
         max_tokens=4096,
         temperature=0.1
     )
-    tools_overview = '''[{"tool_name":"''' + prompt_completion.choices[0].text
+    tools_overview = ""
+    if prompt_completion.choices is not None:
+        if prompt_completion.choices[0].text is not None:
+            tools_overview = '''[{"tool_name":"''' + prompt_completion.choices[0].text
+    
     print(tools_overview)
     return tools_overview
 
@@ -379,7 +383,6 @@ def get_tools():
     tool_dict["overview"] = get_tools_overview(tools)
 
     for bot_tool in tools:
-        tool_methods = []
         if isinstance(bot_tool, StructuredTool):
             tool_schema = convert_to_openai_tool(bot_tool)
             tool_dict[tool_schema["function"]["name"]] = {

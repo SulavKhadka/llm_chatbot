@@ -86,7 +86,6 @@ class ChatBot:
             use_binary=False,
             table_name=f"tool_rag_{chat_id.replace("-", "_")}"
         )
-        self._load_tools_rag()
         
         global logger
         self.user_id = user_id
@@ -115,8 +114,9 @@ class ChatBot:
 
         self.outlines_client = models.openai(self.openai_client, OpenAIConfig("self.model"))
 
-    async def __call__(self, message, role="user"):
+    async def __call__(self, message, role="user", client_type="chat"):
         role = "user" if role is None else role
+        message = f"[device_type: '{client_type}'] {message}"
         # TODO: adjust structure to take in if its a notification or alert from a tool and the notifier
         logger.info("Received_user_message {message}", message=message)
         self._add_message({"role": role, "content": message})
@@ -278,8 +278,8 @@ class ChatBot:
         while self_recurse and recursion_counter < self.max_recurse_depth:
             logger.debug("agent loop recursion depth: {count}", count=recursion_counter)
             
-            transcript_snippet = [m for m in self.messages[-3:] if m.get('role', 'system') != 'system']
-            tool_suggestions = self.tool_rag.query(transcript_snippet, top_k=15, min_p=0.2)
+            transcript_snippet = [f"{m['role']}: {m['content']}" for m in self.messages[-3:] if m.get('role', 'system') != 'system']
+            tool_suggestions = self.tool_rag.query("\n".join(transcript_snippet), top_k=15, min_p=0.2)
             logger.debug("tool_caller_tool_suggestions(top {top_k}) {message}", top_k=15, message=tool_suggestions)
             
             self.rolling_memory()
@@ -359,6 +359,8 @@ class ChatBot:
             VALUES (%s, %s, %s, %s, %s)
         """, (self.chat_id, self.user_id, self.model, self.tokenizer_model, self.system["content"]))
         self.conn.commit()
+
+        self._load_tools_rag()
         
         # Add initial system message
         self._add_message(self.system)
@@ -749,7 +751,7 @@ Preferences:
                 messages=messages,
                 max_tokens=self.max_reply_msg_tokens,
                 temperature=0.1,
-                extra_body= extra_body
+                extra_body= extra_body,
             )
         except Exception as e:
             if e['code'] == 'model_not_available':
@@ -760,35 +762,3 @@ Preferences:
                 raise(e)
         logger.debug("Received_response_from_LLM {completion}", completion=chat_completion.model_dump())
         return chat_completion
-    
-    def get_llm_response_cfg(self, messages: List[Dict[str, str]], model_name: str, extra_body: Optional[dict] = None) -> ChatCompletion | BaseModel:
-        logger.debug("Sending_request_to_LLM {api_provider} {model} {messages}", api_provider=self.openai_client.base_url, model=model_name, messages=messages)
-        if "openrouter" in self.openai_client.base_url.host:
-            extra_body = extra_body if extra_body is not None else self.open_router_extra_body
-        
-        try:
-            chat_completion = self.openai_client.chat.completions.create(
-                model=model_name,
-                messages=messages,
-                max_tokens=self.max_reply_msg_tokens,
-                temperature=0.4,
-                extra_body= {"guided_grammar": RESPONSE_CFG_GRAMMAR}
-            )
-        except Exception as e:
-            if e['code'] == 'model_not_available':
-                pass
-            else:
-                raise
-        logger.debug("Received_response_from_LLM {response}", response=chat_completion.model_dump())
-        return chat_completion
-
-    def get_working_llm_service(self, model_name: str):
-        if "together.ai" in self.openai_client.base_url:
-            headers = {"accept": "application/json", "authorization": f"Bearer {TOGETHER_AI_TOKEN}"}
-            resp = requests.get("https://api.together.xyz/v1/models?type=language", headers=headers)
-            if resp.status_code == 200:
-                models = resp.json()
-                filtered_models = []
-                
-                for model in models:
-                    ctx_len = model.get("context_length", None)
