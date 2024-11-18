@@ -26,6 +26,7 @@ from llm_chatbot.tools.notifier_tool import NotifierTool
 from llm_chatbot.tools.google_calendar_tool import GoogleCalendarTool
 from llm_chatbot.tools.gmail_tool import GmailTool
 from llm_chatbot.tools.yt_dlp_tool import YtDLPTool
+from llm_chatbot.tools.weather_tool import WeatherTool
 
 import numpy as np
 from PIL import Image
@@ -67,71 +68,6 @@ def open_image_file(filepath: str):
         }
     except Exception as e:
         return {"status": "error", "message": f"An unexpected error occurred: {str(e)}"}
-
-
-# create an agent
-@tool
-def get_current_weather(location: str, unit: str) -> str:
-    """Fetches current weather data using OpenWeatherMap API.
-
-    Args:
-        location (str): City name or "City,CountryCode" (e.g. "London,UK")
-        unit (str): 'standard' (Kelvin), 'metric' (Celsius), or 'imperial' (Fahrenheit)
-
-    Returns:
-        str: Dict as string with:
-            {location, country, temperature, feels_like, humidity,
-            description, wind_speed, clouds}
-
-    Requires OpenWeatherMap API key in environment. Uses geocoding for location accuracy.
-    """
-    # API endpoint
-    base_url = "http://api.openweathermap.org/data/2.5/weather"
-
-    # Get API key from environment variable
-    api_key = OPENWATHERMAP_API_TOKEN
-
-    if not api_key:
-        raise ValueError(
-            "OpenWeatherMap API key not found. Make sure it's set in your .env file."
-        )
-
-    geolocator = Nominatim(user_agent="weather_boi")
-    location = geolocator.geocode(location)
-
-    # Parameters for the API request
-    params = {
-        "lat": location.latitude,
-        "lon": location.longitude,
-        "units": unit,  # For temperature in Celsius
-        "appid": api_key,
-    }
-
-    try:
-        # Make the API request
-        response = requests.get(base_url, params=params)
-        response.raise_for_status()  # Raise an exception for bad status codes
-
-        # Parse the JSON response
-        data = response.json()
-        print(data)
-        # Extract relevant information
-        weather_info = {
-            "location": data["name"],
-            "country": data["sys"]["country"],
-            "temperature": data["main"]["temp"],
-            "feels_like": data["main"]["feels_like"],
-            "humidity": data["main"]["humidity"],
-            "description": data["weather"][0]["description"],
-            "wind_speed": data["wind"]["speed"],
-            "clouds": data["clouds"]["all"],
-        }
-
-        return str(weather_info)
-
-    except requests.exceptions.RequestException as e:
-        print(f"An error occurred while fetching weather data: {e}")
-        return None
 
 
 @tool
@@ -365,6 +301,7 @@ def get_tools():
     session = interpreter.create_session()
     notifier_tool = NotifierTool()
 
+    weather_tool = WeatherTool(api_key=OPENWATHERMAP_API_TOKEN)
     yt_dlp_tool = YtDLPTool(output_path="./yt_dlp_output/")
     gmail_tool = GmailTool(credentials_path="./llm_chatbot/tools/gmail_client_creds.json", token_path='./llm_chatbot/tools/gmail_client_token.json')
     calendar_tool = GoogleCalendarTool(credentials_path="./llm_chatbot/tools/google_calendar_creds.json", token_path='./llm_chatbot/tools/google_calendar_token.json')
@@ -372,7 +309,6 @@ def get_tools():
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
     
     tools = [
-        get_current_weather,
         web_search,
         take_screenshots,
         search_arxiv,
@@ -383,7 +319,8 @@ def get_tools():
         hue_tool,
         gmail_tool,
         calendar_tool,
-        yt_dlp_tool
+        yt_dlp_tool,
+        weather_tool
     ]
 
     tool_dict = {}
