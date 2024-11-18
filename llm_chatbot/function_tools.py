@@ -23,6 +23,10 @@ from llm_chatbot.tools.python_interpreter import UVPythonShellManager
 from llm_chatbot.tools.spotify_control import SpotifyTool
 from llm_chatbot.tools.philips_hue_tool import PhilipsHueTool
 from llm_chatbot.tools.notifier_tool import NotifierTool
+from llm_chatbot.tools.google_calendar_tool import GoogleCalendarTool
+from llm_chatbot.tools.gmail_tool import GmailTool
+from llm_chatbot.tools.yt_dlp_tool import YtDLPTool
+
 import numpy as np
 from PIL import Image
 import os
@@ -342,12 +346,16 @@ Your output should always be valid JSON in this format:
         base_url="https://openrouter.ai/api/v1"
     )
     prompt_completion = openai_client.completions.create(
-        model="meta-llama/llama-3.1-70b-instruct",
+        model="google/gemini-flash-1.5-8b",
         prompt=prompt,
         max_tokens=4096,
         temperature=0.1
     )
-    tools_overview = '''[{"tool_name":"''' + prompt_completion.choices[0].text
+    tools_overview = ""
+    if prompt_completion.choices is not None:
+        if prompt_completion.choices[0].text is not None:
+            tools_overview = '''[{"tool_name":"''' + prompt_completion.choices[0].text
+    
     print(tools_overview)
     return tools_overview
 
@@ -355,13 +363,13 @@ def get_tools():
     # Initalize tools
     interpreter = UVPythonShellManager()
     session = interpreter.create_session()
-
-    spotify = SpotifyTool(
-        client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET
-    )
-    hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
-
     notifier_tool = NotifierTool()
+
+    yt_dlp_tool = YtDLPTool(output_path="./yt_dlp_output/")
+    gmail_tool = GmailTool(credentials_path="./llm_chatbot/tools/gmail_client_creds.json", token_path='./llm_chatbot/tools/gmail_client_token.json')
+    calendar_tool = GoogleCalendarTool(credentials_path="./llm_chatbot/tools/google_calendar_creds.json", token_path='./llm_chatbot/tools/google_calendar_token.json')
+    spotify_tool = SpotifyTool(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
+    hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
     
     tools = [
         get_current_weather,
@@ -371,15 +379,17 @@ def get_tools():
         open_image_file,
         notifier_tool,
         interpreter,
-        spotify,
-        hue_tool
+        spotify_tool,
+        hue_tool,
+        gmail_tool,
+        calendar_tool,
+        yt_dlp_tool
     ]
 
     tool_dict = {}
     tool_dict["overview"] = get_tools_overview(tools)
 
     for bot_tool in tools:
-        tool_methods = []
         if isinstance(bot_tool, StructuredTool):
             tool_schema = convert_to_openai_tool(bot_tool)
             tool_dict[tool_schema["function"]["name"]] = {

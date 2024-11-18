@@ -1,6 +1,7 @@
 from typing import Union, Dict
 from dataclasses import dataclass, asdict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.requests import Request
 from uuid import uuid4
 import xml.etree.ElementTree as ET
 from secret_keys import POSTGRES_DB_PASSWORD
@@ -60,11 +61,11 @@ def get_latest_chat_session(user_id: str):
         cur.close()
         db_conn.close()
 
-def get_session(user_id: str, chat_id=None, model="Qwen/Qwen2.5-72B-Instruct"):
+def get_session(user_id: str, chat_id="latest", model="Qwen/Qwen2.5-72B-Instruct"):
     # Define maximum session age (e.g., 24 hours)
     MAX_SESSION_AGE = timedelta(hours=24)
     
-    if chat_id is None or chat_id == "latest":
+    if chat_id == "latest":
         # Get the latest session from database
         latest_chat_id, created_at = get_latest_chat_session(user_id)
         
@@ -126,7 +127,7 @@ manager = ConnectionManager()
 
 # Add WebSocket endpoint
 @app.websocket("/{user_id}/ws")
-async def websocket_endpoint(websocket: WebSocket, user_id: str):
+async def websocket_endpoint(websocket: WebSocket, user_id: str, force_new_session: bool = False):
     await manager.connect(websocket, user_id)
     try:
         while True:
@@ -134,10 +135,13 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
             client_request = ClientRequest(**data)
             
             # Get or create chatbot session
-            chatbot = get_session(user_id=client_request.user_id)
+            chatbot = get_session(
+                user_id = client_request.user_id,
+                chat_id = None if force_new_session else "latest"
+            )
             
             # Process message
-            response = await chatbot(client_request.message)
+            response = await chatbot(client_request.message, client_type=client_request.client_type)
             sanitized_response = utils.sanitize_inner_content(response)
             root = ET.fromstring(f"<root>{sanitized_response}</root>")
             

@@ -13,6 +13,9 @@ import torch
 from data_models import ClientRequest, MessageResponse
 from queue import Queue, Empty
 import asyncio
+import copy
+import pvporcupine
+from secret_keys import PORCUPINE_API_KEY
 
 class SpeechSegmenter:
     def __init__(
@@ -42,6 +45,8 @@ class SpeechSegmenter:
                               model='silero_vad',
                               force_reload=True)
         self.vad_chunk_size = 512 if self.sample_rate == 16000 else 256
+
+        self.wake_word_engine = pvporcupine.create(access_key=PORCUPINE_API_KEY, keywords=['porcupine'])
 
         # Initialize ASR components
         self.asr = FasterWhisperASR("en", "distil-large-v3")
@@ -106,8 +111,21 @@ class SpeechSegmenter:
                 vad_chunk[:len(audio_chunk)-i] = audio_chunk[i:i+self.vad_chunk_size]
             else:
                 vad_chunk = audio_chunk[i:i+self.vad_chunk_size]
+
+            if self.wake_word_engine.process((vad_chunk * 32767).astype(np.int16)) >= 0:
+                if not self.is_speaking:
+                    new_audio_chunk = np.zeros(len(audio_chunk), dtype=np.float32)
+                    new_audio_chunk[i: len(audio_chunk)] = audio_chunk[i: len(audio_chunk)]
+                    audio_chunk = copy.deepcopy(new_audio_chunk)
+                    self.all_segments = []
+
+                    self.is_speaking = True
+                    return False
             
-            vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            if self.is_speaking:
+                vad_confidences.append(self.vad_model(torch.from_numpy(vad_chunk), 16000).item())
+            else:
+                vad_confidences.append(0.0)
         
         vad_confidences = torch.tensor(vad_confidences)
         smas = np.convolve(vad_confidences, np.ones(5), 'valid') / 5
@@ -146,36 +164,37 @@ class SpeechSegmenter:
                 current_time = time.time()
 
                 # Check for silence
-                if self.is_silence(audio_chunk) and not self.tts_engine.is_playing:
-                    if (self.is_speaking and 
-                        (current_time - self.last_speech_time) > self.silence_duration):
-                        
-                        # End of speech segment detected
-                        self.is_speaking = False
-                        final_output = self.online.finish()
-                        
-                        if final_output[2]:
-                            self.all_segments.append(final_output[2])
+                if self.tts_engine.is_playing is False:
+                    if self.is_silence(audio_chunk):
+                        if (self.is_speaking and 
+                            (current_time - self.last_speech_time) > self.silence_duration):
+                            
+                            # End of speech segment detected
+                            self.is_speaking = False
+                            final_output = self.online.finish()
+                            
+                            if final_output[2]:
+                                self.all_segments.append(final_output[2])
 
-                        user_input_segment = "".join(self.all_segments)
-                        print(f"Speech segment complete: {user_input_segment}")
-                        
-                        message = ClientRequest(
-                            user_id="",
-                            client_type="voice",
-                            message=user_input_segment,
-                            user_metadata={}
-                        )
-                        
-                        # Put message in queue
-                        await user_queue.put(message)
-                        print("Message sent to queue")
-                        
-                        self.all_segments = []
-                        self.online.init()
-                else:
-                    self.last_speech_time = current_time
-                    self.is_speaking = True
+                            user_input_segment = "".join(self.all_segments)
+                            print(f"Speech segment complete: {user_input_segment}")
+                            
+                            message = ClientRequest(
+                                user_id="",
+                                client_type="voice",
+                                message=user_input_segment,
+                                user_metadata={}
+                            )
+                            
+                            # Put message in queue
+                            await user_queue.put(message)
+                            print("Message sent to queue")
+                            
+                            self.all_segments = []
+                            self.online.init()
+                    else:
+                        self.last_speech_time = current_time
+                        self.is_speaking = True
 
                 # Process with Whisper if in speech segment
                 if self.is_speaking:
@@ -190,7 +209,7 @@ class SpeechSegmenter:
                 await asyncio.sleep(0)
                 
         except Exception as e:
-            print(f"Error in process_audio: {e}", exc_info=True)
+            print(f"Error in process_audio: {e}")
         finally:
             self.stop_audio_stream()
             print("Audio processing stopped")

@@ -72,8 +72,7 @@ class TTSProcessor:
                 "chunk_size": new_audio.shape[0],
                 "audio_data": audio_b64
             }
-
-        # await generation_task  # Ensure generation is complete
+        generation_task.join()
 
 app = FastAPI()
 tts_processor = TTSProcessor()
