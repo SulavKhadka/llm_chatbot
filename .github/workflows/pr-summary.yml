@@ -16,8 +16,15 @@ jobs:
       - name: Get PR diff
         id: get-diff
         run: |
-          git fetch origin ${{ github.base_ref }}
-          DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+          if [ "${{ github.event.action }}" = "opened" ]; then
+            # For newly opened PRs, get the full diff
+            git fetch origin ${{ github.base_ref }}
+            DIFF=$(git diff origin/${{ github.base_ref }}...HEAD)
+          else
+            # For synchronized PRs, get only the diff of new changes
+            git fetch origin ${{ github.event.before }}
+            DIFF=$(git diff ${{ github.event.before }}...${{ github.event.after }})
+          fi
           echo "DIFF<<EOF" >> $GITHUB_ENV
           echo "$DIFF" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -41,6 +48,12 @@ jobs:
 
             const diff = process.env.DIFF;
             
+            // Skip if there are no changes
+            if (!diff?.trim()) {
+              console.log("No changes detected in this update");
+              return;
+            }
+
             const completion = await client.chat.completions.create({
               model: "anthropic/claude-3-5-haiku-20241022",
               messages: [{
@@ -54,9 +67,12 @@ jobs:
             
             const summary = completion.choices[0].message.content;
             console.log(summary);
+
+            const summaryType = process.env.SUMMARY_TYPE || 'Changes';
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## 🤖 Automated PR Summary\n\n${summary}`
+              body: `## 🤖 Automated PR Summary - ${summaryType}\n\n${summary}`
             });

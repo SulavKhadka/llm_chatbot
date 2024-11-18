@@ -10,6 +10,7 @@ import json
 
 from bot_tts import SpeechSegmenter
 from data_models import ClientType, ClientRequest, MessageResponse
+from secret_keys import USER_ID
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    client = ChatbotClient("sulav_test", "ws://localhost:8000/sulav_test/ws")
+    client = ChatbotClient(USER_ID, f"ws://localhost:8000/{USER_ID}/ws?force_new_session=true")
     
     # Voice handler
     segmenter = SpeechSegmenter(

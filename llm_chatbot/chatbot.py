@@ -77,7 +77,8 @@ class ChatBot:
         self.conversation_rag = VectorSearch(
             db_config=db_config,
             dimensions=256,
-            use_binary=False
+            use_binary=False,
+            table_name=f"conversation_rag_{chat_id.replace("-", "_")}"
         )
 
         self.tool_rag = VectorSearch(
@@ -262,6 +263,34 @@ class ChatBot:
 
         logger.info("Database '{dbname}' and tables have been initialized successfully.", dbname=dbname)
 
+    def _load_chat_messages_rag(self):
+        """
+        Loads chat messages from the database and bulk inserts them into the conversation_rag index.
+        Messages are formatted as '[timestamp] role: content' for searchability.
+        """
+        # Query to get all messages for this chat session
+        self.cur.execute("""
+            SELECT id, chat_id, role, content, token_count, is_purged, created_at, updated_at
+            FROM chat_messages 
+            WHERE chat_id = %s
+            ORDER BY created_at, id
+        """, (self.chat_id,))
+        
+        # Format messages for RAG insertion, excluding system messages
+        rag_entries = []
+        for row in self.cur.fetchall():
+            if row[2] != "system":  # Skip system messages
+                timestamp = row[7].strftime("%Y-%m-%d %H:%M:%S")
+                formatted_message = f"[{timestamp}] {row[2]}: {row[3]}"
+                rag_entries.append((formatted_message, None))  # None for metadata as per VectorSearch.bulk_insert
+        
+        # Bulk insert into conversation_rag if we have entries
+        if rag_entries:
+            self.conversation_rag.bulk_insert(rag_entries)
+            logger.info("Loaded {count} messages into conversation RAG", count=len(rag_entries))
+        else:
+            logger.debug("No messages to load into conversation RAG")
+
     def _load_tools_rag(self):
         tools = []
     
@@ -281,10 +310,13 @@ class ChatBot:
             transcript_snippet = [f"{m['role']}: {m['content']}" for m in self.messages[-3:] if m.get('role', 'system') != 'system']
             tool_suggestions = self.tool_rag.query("\n".join(transcript_snippet), top_k=15, min_p=0.2)
             logger.debug("tool_caller_tool_suggestions(top {top_k}) {message}", top_k=15, message=tool_suggestions)
+
+            previous_chat_context = self.conversation_rag.query("\n".join(transcript_snippet), top_k=15, min_p=0.2)
+            logger.debug("previous_chat_context {context}", context=previous_chat_context)
             
             self.rolling_memory()
             try:
-                parsed_response: AssistantResponse = await self.execute(tool_suggestions[:5])
+                parsed_response: AssistantResponse = await self.execute(tool_suggestions[:5], previous_chat_context[:5])
             except Exception as e:
                 logger.debug("failed parsing assistant response {error}", error=e)
                 parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
@@ -361,6 +393,7 @@ class ChatBot:
         self.conn.commit()
 
         self._load_tools_rag()
+        self._load_chat_messages_rag()
         
         # Add initial system message
         self._add_message(self.system)
@@ -655,7 +688,7 @@ class ChatBot:
         self.cur.close()
         self.conn.close()
 
-    async def execute(self, tool_suggestions, retries: int = 3):
+    async def execute(self, tool_suggestions, previous_chat_context, retries: int = 3):
         # prefs = "\t-".join([i for i in USER_INFO['preferences']])
         
         while retries > 0:
@@ -674,8 +707,10 @@ Name: {USER_INFO['username']}
 Home Address: {USER_INFO['home_address']}
 Preferences:
     - Measurement unit: {USER_INFO['units']}
-    - {"\t- ".join([i for i in USER_INFO['preferences']])}
+    - {"\n\t- ".join([i for i in USER_INFO['preferences']])}
 
+## Previous Chat Context Snippets
+{previous_chat_context}
 
 ## End
     '''
