@@ -1,17 +1,38 @@
 import os
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any
 from base64 import urlsafe_b64encode
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import inspect
+from dataclasses import dataclass
+import base64
+from datetime import datetime
+import email.utils
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+
+@dataclass
+class GoogleEmail:
+    id: str
+    thread_id: str
+    label_ids: List[str]
+    snippet: str
+    sender: str
+    reciever: str
+    subject: str
+    sent_datetime: str
+    recieved_datetime: str
+    internal_date: str
+    body: str
+    is_html: bool = False
+
 
 class GmailTool:
     """
@@ -89,6 +110,107 @@ class GmailTool:
         
         return creds
 
+    def _decode_base64url(self, base64_content: str) -> str:
+        """Decode base64url encoded string to UTF-8 text."""
+        if not base64_content:
+            return ""
+        
+        # Add padding if needed
+        pad_length = len(base64_content) % 4
+        if pad_length:
+            base64_content += '=' * (4 - pad_length)
+        
+        # Replace URL-safe characters
+        base64_content = base64_content.replace('-', '+').replace('_', '/')
+        
+        try:
+            decoded_bytes = base64.b64decode(base64_content)
+            return decoded_bytes.decode('utf-8')
+        except Exception as e:
+            print(f"Error decoding base64: {e}")
+            return ""
+
+    def _extract_email_header_value(self, headers: List[Dict[str, str]], header_name: str) -> str:
+        """Extract value from email headers."""
+        for header in headers:
+            if header['name'].lower() == header_name.lower():
+                return header['value']
+        return ""
+
+    def _parse_email_message_part(self, part: Dict[str, Any]) -> tuple[Optional[str], bool]:
+        """Parse a message part and return body content and is_html flag."""
+        if not part:
+            return None, False
+
+        # Get content transfer encoding
+        content_transfer_encoding = None
+        if 'headers' in part:
+            content_transfer_encoding = self._extract_email_header_value(part['headers'], 'Content-Transfer-Encoding')
+
+        body_data = part.get('body', {}).get('data')
+        
+        if part.get('mimeType') == 'text/plain':
+            return self._decode_base64url(body_data), False
+        elif part.get('mimeType') == 'text/html':
+            return self._decode_base64url(body_data), True
+        
+        return None, False
+
+    def _extract_email_message_content(self, payload: Dict[str, Any]) -> tuple[str, bool]:
+        """Recursively extract message content from payload."""
+        body = ""
+        is_html = False
+
+        # Handle multipart messages
+        if 'parts' in payload:
+            for part in payload['parts']:
+                part_body, part_is_html = self._parse_email_message_part(part)
+                if part_body:
+                    # Prefer HTML content over plain text
+                    if part_is_html:
+                        return part_body, True
+                    body = part_body
+                    is_html = part_is_html
+        else:
+            # Single part message
+            body, is_html = self._parse_email_message_part(payload)
+
+        return body or "", is_html
+
+    def _parse_gmail_message(self, message: Dict[str, Any]) -> GoogleEmail:
+        """Parse Gmail API message into GoogleEmail dataclass."""
+        payload = message['payload']
+        headers = payload['headers']
+
+        # Extract basic headers
+        sender = self._extract_email_header_value(headers, 'From')
+        receiver = self._extract_email_header_value(headers, 'To')
+        subject = self._extract_email_header_value(headers, 'Subject')
+        date = self._extract_email_header_value(headers, 'Date')
+        received = self._extract_email_header_value(headers, 'Received')
+
+        # Parse dates
+        sent_datetime = email.utils.parsedate_to_datetime(date).isoformat() if date else ""
+        received_datetime = email.utils.parsedate_to_datetime(received.split(';')[1].strip()).isoformat() if received else ""
+
+        # Extract body content
+        body, is_html = self._extract_email_message_content(payload)
+
+        return GoogleEmail(
+            id=message['id'],
+            thread_id=message['threadId'],
+            label_ids=message.get('labelIds', []),
+            snippet=message.get('snippet', ''),
+            sender=sender,
+            reciever=receiver,
+            subject=subject,
+            sent_datetime=sent_datetime,
+            recieved_datetime=received_datetime,
+            internal_date=message.get('internalDate', ''),
+            body=body,
+            is_html=is_html
+        )
+
     def send_email(self, to: str, subject: str, body: str, html: bool = False) -> Dict:
         """
         Send an email to specified recipient.
@@ -152,22 +274,26 @@ class GmailTool:
         except HttpError as error:
             raise Exception(f"Failed to fetch messages: {error}")
 
-    def get_message(self, message_id: str) -> Dict:
+    def get_message(self, message_id: str, do_format: bool = True) -> Dict:
         """
         Get a specific email message by ID.
         
         Args:
             message_id: The ID of the message to retrieve
+            do_format: Boolean indicating if the emails should be loaded into pydantic data model (default=True)
             
         Returns:
             Dictionary containing message details
         """
         try:
-            return self.service.users().messages().get(
+            specific_email = self.service.users().messages().get(
                 userId=self.user_id,
                 id=message_id,
                 format='full'
             ).execute()
+            if do_format:
+                specific_email = self._parse_gmail_message(specific_email)
+            return specific_email
         except HttpError as error:
             raise Exception(f"Failed to fetch message: {error}")
 
