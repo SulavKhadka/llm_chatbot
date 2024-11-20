@@ -84,16 +84,3 @@ class BraveSearchTool:
         }
         results = self._make_request(params)
         return self._format_results(results, count)
-
-    def _search_news(self, query: str, count: int = 5, hours: Optional[int] = 24) -> List[Dict[str, str]]:
-        """Search recent news. Usage: query='news topic', count=1-10, hours=past time window.
-        Returns: [{"title": str, "url": str, "description": str}, ...] ordered by recency
-        and relevance. Set hours for time window (24=day, 168=week)."""
-        params = {
-            **self._default_params,
-            "q": f"{query} before:{hours}h",
-            "count": min(max(1, count), 10),
-            "news": "true"
-        }
-        results = self._make_request(params)
-        return self._format_results(results, count)
