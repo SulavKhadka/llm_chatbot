@@ -240,13 +240,14 @@ class GmailTool:
         except HttpError as error:
             raise Exception(f"Failed to send email: {error}")
 
-    def get_messages(self, query: str = None, max_results: int = 10) -> List[Dict]:
+    def get_messages(self, query: str = None, max_results: int = 10, get_body_content: bool = False) -> List[Dict]:
         """
         Get email messages matching the specified query.
         
         Args:
             query: Gmail search query (None for all messages)
             max_results: Maximum number of messages to return
+            get_body_content: Boolean stating if to return the email body content (default=False) (saves tokens)
             
         Returns:
             List of message dictionaries
@@ -270,18 +271,19 @@ class GmailTool:
                     messages = messages[:max_results]
                     break
                     
-            return [self.get_message(msg['id']) for msg in messages]
+            return [self.get_message(msg['id'], get_body_content=get_body_content) for msg in messages]
         except HttpError as error:
             raise Exception(f"Failed to fetch messages: {error}")
 
-    def get_message(self, message_id: str, do_format: bool = True) -> Dict:
+    def get_message(self, message_id: str, do_format: bool = True, get_body_content: bool = False) -> Dict:
         """
         Get a specific email message by ID.
         
         Args:
             message_id: The ID of the message to retrieve
-            do_format: Boolean indicating if the emails should be loaded into pydantic data model (default=True)
-            
+            do_format: Boolean stating if the emails should be loaded into pydantic data model (default=True) (saves tokens)
+            get_body_content: Boolean stating if to return the email body content (default=False) (saves tokens)
+
         Returns:
             Dictionary containing message details
         """
@@ -293,6 +295,7 @@ class GmailTool:
             ).execute()
             if do_format:
                 specific_email = self._parse_gmail_message(specific_email)
+                specific_email.body = "[REMOVED_BY_TOOL]" if not get_body_content else specific_email.body
             return specific_email
         except HttpError as error:
             raise Exception(f"Failed to fetch message: {error}")
