@@ -487,12 +487,20 @@ class ChatBot:
         self.cur.execute("""
             INSERT INTO chat_messages (chat_id, role, content, token_count)
             VALUES (%s, %s, %s, %s)
-            RETURNING id
+            RETURNING *
         """, (self.chat_id, message['role'], message['content'], token_count))
-        message_id = self.cur.fetchone()[0]
+        added_message = self.cur.fetchone()
+
+        # Format messages for RAG insertion, excluding system messages
+        if added_message[2] != "system":  # Skip system messages
+            timestamp = added_message[7].strftime("%Y-%m-%d %H:%M:%S")
+            formatted_message = f"[{timestamp}] {added_message[2]}: {added_message[3]}"
+            self.conversation_rag.insert(formatted_message, None)
+            logger.info(f"Loaded message into conversation RAG, message_id: {added_message[0]}")
+
         self.conn.commit()
         logger.debug("Added_message: {message}, token_count {token_count}, total_tokens {total_tokens} self.total_messages_tokens", message=message, token_count=token_count, total_tokens=self.total_messages_tokens)
-        return message_id
+        return added_message[0]
 
     async def _get_bot_response_json(self, response_text: str):
         logger.debug("response_text_to_json: {response_text}", response_text=response_text)
