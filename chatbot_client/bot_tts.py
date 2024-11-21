@@ -1,6 +1,7 @@
 import json
 from whisper_online import *
 import sounddevice as sd
+import soundfile as sf
 import numpy as np
 from scipy import signal
 import time
@@ -47,6 +48,7 @@ class SpeechSegmenter:
         self.vad_chunk_size = 512 if self.sample_rate == 16000 else 256
 
         self.wake_word_engine = pvporcupine.create(access_key=PORCUPINE_API_KEY, keywords=['porcupine'])
+        self.wake_word_sound = sf.read("/home/bobby/Repos/llm_chatbot/chatbot_client/wakeword_trigger_sound.wav")
 
         # Initialize ASR components
         self.asr = FasterWhisperASR("en", "distil-large-v3")
@@ -114,6 +116,8 @@ class SpeechSegmenter:
 
             if self.wake_word_engine.process((vad_chunk * 32767).astype(np.int16)) >= 0:
                 if not self.is_speaking:
+                    sd.play(self.wake_word_sound[0], samplerate=self.wake_word_sound[1], blocking=True)
+
                     new_audio_chunk = np.zeros(len(audio_chunk), dtype=np.float32)
                     new_audio_chunk[i: len(audio_chunk)] = audio_chunk[i: len(audio_chunk)]
                     audio_chunk = copy.deepcopy(new_audio_chunk)
