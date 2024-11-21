@@ -80,7 +80,8 @@ def get_session(user_id: str, chat_id="latest", model="Qwen/Qwen2.5-72B-Instruct
             session_age = current_time - created_at
             if session_age <= MAX_SESSION_AGE:
                 chat_id = latest_chat_id
-        else:
+        
+        if chat_id == "latest":
             chat_id = None
     
     # If we have a specific chat_id or valid latest session, try to load from active_sessions

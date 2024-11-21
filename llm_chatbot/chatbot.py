@@ -25,7 +25,7 @@ from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
 from llm_chatbot.chatbot_data_models import AssistantResponse, ResponseType, ToolParameter
 from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY, USER_INFO
-from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, BOT_RESPONSE_FORMATTER_PROMPT, CONTEXT_FILTERED_TOOL_RESULT_PROMPT, RESPONSE_CFG_GRAMMAR
+from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, BOT_RESPONSE_FORMATTER_PROMPT, CONTEXT_FILTERED_TOOL_RESULT_PROMPT, CRITIC_PROMPT_V1
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -128,6 +128,13 @@ class ChatBot:
             logger.error("agent loop failed {error}", error=e)
             response = f"Agent failed to process data, Error: {e}"
         return response
+
+    def __del__(self):
+        # self._get_session_notes(f"{self.chat_id}_final_session_notes")
+        
+        # Close database connection when the object is destroyed
+        self.cur.close()
+        self.conn.close()
 
     @classmethod
     def initialize_db(cls, dbname: str, user: str, password: str, host: str = 'localhost', port: str = '5432'):
@@ -343,7 +350,7 @@ class ChatBot:
                     tool_call_responses = []
                     for tool_call in tool_calls:
                         try:
-                            fn_response = await self._execute_function_call(tool_call)
+                            fn_success, fn_response = await self._execute_function_call(tool_call)
                             tool_call_responses.append(fn_response)
                         except Exception as e:
                             tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
@@ -356,20 +363,13 @@ class ChatBot:
                 self_recurse = False
                 response = {"role": "assistant", "content": f"{llm_thought}\n<response_to_user>{parsed_response.response.content}</response_to_user>"}
 
-                # tool response cleanup from possible inner cycles and tool calls
-                # TODO: token counting is more complex now, somewhere else too, gotta comb the codebase
-                # if len(processing_tool_call) > 0:
-                #     for tool_call_resp in processing_tool_call:
-                #         for i in range(len(self.messages)-1, 0, -1):
-                #             if self.messages[i]['role'] == 'tool' and tool_call_resp['content'] == self.messages[i]['content']:
-                #                 logger.debug("deleting tool_call_response instance message: {msg} to get tool response clear of the active conversation context", msg=self.messages[i])
-                #                 self.messages.pop(i)
-                #                 break
                 processing_tool_call = []
 
             if parsed_response.response.type  == ResponseType.INTERNAL_RESPONSE:
                 response = {"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response.response.content}</internal_response>"}
 
+            if (response in self.messages[-5:]):
+                response = self._get_critic_feedback()
             self._add_message(response)
             logger.info("Assistant_response {response}", response=response)
 
@@ -487,18 +487,47 @@ class ChatBot:
         self.cur.execute("""
             INSERT INTO chat_messages (chat_id, role, content, token_count)
             VALUES (%s, %s, %s, %s)
-            RETURNING id
+            RETURNING *
         """, (self.chat_id, message['role'], message['content'], token_count))
-        message_id = self.cur.fetchone()[0]
+        added_message = self.cur.fetchone()
+
+        # Format messages for RAG insertion, excluding system messages
+        if added_message[2] != "system":  # Skip system messages
+            timestamp = added_message[7].strftime("%Y-%m-%d %H:%M:%S")
+            formatted_message = f"[{timestamp}] {added_message[2]}: {added_message[3]}"
+            self.conversation_rag.insert(formatted_message, None)
+            logger.info(f"Loaded message into conversation RAG, message_id: {added_message[0]}")
+
         self.conn.commit()
         logger.debug("Added_message: {message}, token_count {token_count}, total_tokens {total_tokens} self.total_messages_tokens", message=message, token_count=token_count, total_tokens=self.total_messages_tokens)
-        return message_id
+        return added_message[0]
 
     async def _get_bot_response_json(self, response_text: str):
         logger.debug("response_text_to_json: {response_text}", response_text=response_text)
         response_formatter_messages = [
             {"role": "system", "content": BOT_RESPONSE_FORMATTER_PROMPT},
             {"role": "user", "content": response_text}
+        ]
+        response = await self.get_llm_response(
+            messages=response_formatter_messages,
+            model_name="google/gemini-flash-1.5-8b",
+            extra_body={
+                "response_format": {
+                    "type": "json_object",
+                }
+            },
+        )
+        logger.debug("response_text_to_json {reformatted_text}", reformatted_text=response.choices[0].message.content)
+        ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
+        return ass_resp
+    
+    async def _get_critic_feedback(self):
+        logger.debug("getting critic feedback for the current conversation")
+        agent_transcript = f"system: {self.system}\n"
+        agent_transcript += "\n".join([f"{m['role']}: {m['content']}" for m in self.messages[-5:] if m.get('role', 'system') != 'system'])
+        response_formatter_messages = [ 
+            {"role": "system", "content": CRITIC_PROMPT_V1},
+            {"role": "user", "content": f"<current_conversation_transcript>\n{agent_transcript}\n<current_conversation_transcript>"}
         ]
         response = await self.get_llm_response(
             messages=response_formatter_messages,
@@ -567,6 +596,7 @@ class ChatBot:
         logger.info("Executing_function_call {tool_call}", tool_call=tool_call)
         if tool_call.name is not None and tool_call.name in self.functions.keys():
             function_to_call = self.functions.get(tool_call.name, {}).get('function', None)
+            success = False
 
             logger.debug("Function_call_details {name} {args}", name=tool_call.name, args=tool_call.parameters)
             try:
@@ -574,7 +604,9 @@ class ChatBot:
                 logger.info("filtering function call response {name} {result}", name=tool_call.name, result=function_response)
                 function_response = await self._get_context_filtered_tool_results(tool_call, function_response)
                 logger.debug("filtered function call response {name} {result}", name=tool_call.name, result=function_response)
+                success = True
             except Exception as e:
+                logger.error("function call errored out. Func: {fn} | Error: {error}", fn=tool_call, error=e)
                 function_response = f"Function call errored out. Error: {e}"
             results_dict = {"name": tool_call.name, "content": function_response}
             logger.debug("Function_call_response {response}", response=results_dict)
@@ -585,7 +617,7 @@ class ChatBot:
                 VALUES (%s, %s, %s, %s)
             """, (self.chat_id, tool_call.name, Json(tool_call.parameters), str(function_response)))
             self.conn.commit()
-            return results_dict
+            return success, results_dict
         else:
             logger.warning("Invalid_function_name {name}", name=tool_call.name)
             return f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
@@ -683,12 +715,6 @@ class ChatBot:
         """, (message_id, self.chat_id, parsed_resp['notes'], "", Json({"model": self.model, "provider": str(self.openai_client.base_url)})))
         self.conn.commit()
 
-    def __del__(self):
-        # self._get_session_notes(f"{self.chat_id}_final_session_notes")
-        # Close database connection when the object is destroyed
-        self.cur.close()
-        self.conn.close()
-
     async def execute(self, tool_suggestions, previous_chat_context, retries: int = 3):
         # prefs = "\t-".join([i for i in USER_INFO['preferences']])
         
@@ -722,11 +748,8 @@ Preferences:
             else:
                 self.system['content'] = self.system['content'] + '\n' + current_info
         
-            
-            messages = [self.system]
-            messages.extend(self.messages)
-            logger.info("Executing_LLM_call {message_count}", message_count=len(messages))
-            completion = await self.get_llm_response(messages=messages, model_name=self.model)
+            logger.info("Executing_LLM_call {message_count}", message_count=len(self.messages))
+            completion = await self.get_llm_response(messages=self.messages, model_name=self.model)
             logger.debug("LLM_response {response}", response=completion.model_dump())
             logger.info("Token_usage {usage}", usage=completion.usage.model_dump())
 
