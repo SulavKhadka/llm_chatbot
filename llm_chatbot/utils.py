@@ -1,5 +1,4 @@
 from typing import List, Union
-from prompts import RESPONSE_CFG_GRAMMAR
 from secret_keys import TOGETHER_AI_TOKEN, OPENROUTER_API_KEY
 import openai
 import xml.etree.ElementTree as ET
@@ -151,166 +150,83 @@ def sanitize_inner_content(llm_output):
     llm_output = llm_output.replace(">\n", ">").replace("\n<", "<").strip()
     return llm_output
 
-def ensure_llm_response_format(llm_response_text, tools=None):
-    openai_client = openai.OpenAI(
-            api_key='hi',
-            base_url="http://localhost:8555/v1"
-        )
+def format_function_schema(schema):
+    """
+    Converts a function call schema into readable declaration and call syntax.
     
-    messages = [
-        {
-            "role": "system",
-            "content": """You are an expert at validating and correcting the XML structure of responses from another LLM. Your task is to ensure that the responses conform to the guidelines specified in the original system prompt. Focus solely on the XML structure and tag usage, not on the content or wording of the response. You'll be given the LLM response to analyze inside of <llm_response_content></llm_response_content> by the user.
-
-## Guidelines for checking response content:
-
-1. Every response must be a valid parseable XML with no exceptions.
-2. The response must always begin with a <thought></thought> tag.
-3. After the thought tag, there must be exactly one of the following response types:
-   - <tool_use></tool_use>
-     - Used when the assistant needs to access external data or functions.
-     - Must contain a list of JSON objects with "name" and "parameters" keys.
-     - Only functions specified in the original <tools></tools> section should be used.
-   - <self_response></self_response>
-     - Used when the assistant needs another cycle to process something.
-     - This is an internal message and will not be visible to the user.
-   - <response_to_user></response_to_user>
-     - Used for direct replies to the user when no further processing is needed.
-     - This is the only tag whose content the user will see.
-4. Ensure all XML tags are properly opened and closed.
-5. Check that the XML is well-formed and can be parsed.
-6. Verify that only the tools specified in the original <tools></tools> section are used in <tool_use> tags.
-7. For <tool_use> tags, ensure the content is a valid list of JSON objects with "name" and "parameters" keys.
-
-If the response follows these guidelines and has valid, parseable XML, reply only with "no correction needed" and no other text before or after.
-
-If the response does not conform to these guidelines or contains invalid XML:
-1. Correct the XML structure while preserving the original content as is besides the XML tags
-2. When correcting, keep the original wording intact; only edit the tags, move existing content to the correct tags, or adjust the structure to comply with the guidelines to create valid XML.
-3. If a response is missing a required tag (i.e. <thought>), add it with placeholder content like "[Missing thought process]".
-4. If multiple response types are present, keep the most appropriate one based on the content and remove the others.
-
-## Examples:
-
-1. Correct response (no correction needed): This is the most common result/response. If the XML is good reply like this strictly
-Input:
-<llm_response_content>
-<thought>The user has asked about the weather in New York. I need to use the weather API to get this information.</thought>
-<tool_use>
-[{"name": "get_current_weather", "parameters": {"location": "New York, NY", "unit": "Fahrenheit"}}]
-</tool_use>
-</llm_response_content>
-
-Output: no correction needed
-
-2. Multiple response types (can only have one, keep most appropriate):
-Input:
-<llm_response_content>
-<thought>The user asked about quantum computing. I'll provide a brief explanation.</thought>
-<self_response>Researching quantum computing basics.</self_response>
-<response_to_user>Quantum computing is a form of computation that harnesses the principles of quantum mechanics to process information.</response_to_user>
-</llm_response_content>
-
-Output:
-<thought>The user asked about quantum computing. I'll provide a brief explanation.</thought>
-<response_to_user>Quantum computing is a form of computation that harnesses the principles of quantum mechanics to process information.</response_to_user>
-
-3. Missing closing tag:
-Input:
-<llm_response_content>
-<thought>
-I'll use the `run_python_code` tool to execute the provided Python code.
-</thought>
-<tool_use>
-[{"name": "run_python_code","parameters": {"code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"}}]
-</llm_response_content>
-
-Output:
-<thought>
-I'll use the `run_python_code` tool to execute the provided Python code.
-</thought>
-<tool_use>
-[{"name": "run_python_code","parameters": {"code": "import random\n\ndef generate_and_average():\n    numbers = [random.randint(1, 100) for _ in range(5)]\n    average = sum(numbers) / len(numbers)\n    return numbers, average\n\n# Run the function 5 times\nresults = [generate_and_average() for _ in range(5)]\nfor i, (numbers, average) in enumerate(results):\n    print(f'Run {i + 1}: Numbers = {numbers}, Average = {average}')"}}]
-</tool_use>
-
-4. Incorrect nesting of tags plus tool call JSON problems:
-Input:
-<llm_response_content>
-<thought>The user wants to know about famous landmarks in Paris.</thought>
-<response_to_user>Here are some famous landmarks in Paris:
-<tool_use>
-["name": "get_landmarks", "parameters": {"city": "Paris"}}]
-</tool_use>
-</response_to_user>
-</llm_response_content>
-
-Output:
-<thought>The user wants to know about famous landmarks in Paris.</thought>
-<tool_use>
-[{"name": "get_landmarks", "parameters": {"city": "Paris"}}]
-</tool_use>
-
-5. Mixing content outside of tags:
-Input:
-<llm_response_content>
-Hello! <thought>The user greeted me. I should respond politely.</thought>
-<response_to_user>Hi there! How can I assist you today?</response_to_user>
-</llm_response_content>
-
-Output:
-<thought>The user greeted me. I should respond politely.</thought>
-<response_to_user>Hello! Hi there! How can I assist you today?</response_to_user>
-""" + f"""\nFor the input you are about to recieve here is the list of tools available to the agent that generated the llm_response_text.
-<tools>
-{tools}
-</tools>
-
-Remember, your task is to ensure every payload has proper XML structure and tag usage, correcting structure as needed while always perfectly copying the content of the responses. No action needed when XML is valid, evaluate carefully using the examples given above as a guide. Always keep the original content, intent, and wording of the assistant's response while correcting only the XML structure. A frequent correction is missing XML tag pairs opening or closing, just a tip."""
-        },
-        {
-            "role": "user",
-            "content": f"""<llm_response_content>{llm_response_text}</llm_response_content>"""
-        }
-    ]
-
+    Args:
+        schema (dict): Function schema dictionary containing name, description, and parameters
+        
+    Returns:
+        tuple: (declaration_syntax, call_syntax)
+    """
     try:
-        chat_completion = openai_client.chat.completions.create(
-            model="Qwen/Qwen2.5-3B-Instruct",
-            messages=messages,
-            max_tokens=1536,
-            temperature=0.4,
-            frequency_penalty=0.4,
-            extra_body= {
-                "min_p": 0.2,
-                "top_k": 35,
-                "guided_grammar": RESPONSE_CFG_GRAMMAR
-            }
-        )
+        # Extract basic function info
+        if not isinstance(schema, dict) or 'function' not in schema:
+            raise ValueError("Invalid schema format")
+            
+        func_info = schema['function']
+        func_name = func_info.get('name')
+        params_info = func_info.get('parameters', {})
+        
+        if not func_name:
+            raise ValueError("Function name not found in schema")
+            
+        # Get properties and required fields
+        properties = params_info.get('properties', {})
+        required_params = params_info.get('required', [])
+        
+        # Process parameters
+        param_list = []
+        
+        # Build declaration syntax
+        declaration_params = []
+        for param_name, param_info in properties.items():
+            # Get parameter type
+            param_type = param_info.get('type', 'Any')
+            param_type = param_type.capitalize()  # Convert 'string' to 'String' etc.
+            
+            # Check if parameter has a default value
+            has_default = 'default' in param_info
+            default_value = param_info.get('default')
+            
+            # Format the parameter string
+            param_str = f"{param_name}: {param_type}"
+            if has_default:
+                param_str += f" = {repr(default_value)}"
+            elif param_name not in required_params:
+                param_str += " = None"
+                
+            declaration_params.append(param_str)
+            
+        declaration = f"def {func_name}({', '.join(declaration_params)})"
+        
+        # Build call syntax
+        call_params = []
+        for param_name, param_info in properties.items():
+            param_type = param_info.get('type', 'any')
+            if 'default' in param_info:
+                call_params.append(f"{param_name}={repr(param_info['default'])}")
+            else:
+                # Use appropriate placeholder based on type
+                type_placeholders = {
+                    'string': '"example"',
+                    'integer': '0',
+                    'number': '0.0',
+                    'boolean': 'False',
+                    'array': '[]',
+                    'object': '{}',
+                }
+                placeholder = type_placeholders.get(param_type.lower(), 'None')
+                call_params.append(f"{param_name}={placeholder}")
+                
+        call = f"{func_name}({', '.join(call_params)})"
+        
+        return declaration, call
+        
     except Exception as e:
-        if e['code'] == 'model_not_available':
-            pass
-        else:
-            raise
-    print({"event": "Received_response_from_LLM", "response": chat_completion.model_dump()})
+        raise ValueError(f"Error processing schema: {str(e)}")
 
-
-
-    # sanitized_llm_output = sanitize_inner_content(chat_completion.choices[0].message.content)
-    # xml_root_element = f"""<root>{sanitized_llm_output}</root>"""
-    # try:
-    #     root = ET.fromstring(xml_root_element)
-    # except ET.ParseError as e:
-    #     return ET.fromstring("<root></root>")
-
-    # if root.find(".//thought") is not None and (
-    #     root.find(".//self_response") is not None
-    #     or root.find(".//response_to_user") is not None
-    #     or root.find(".//tool_use") is not None
-    # ):
-    #     return root
-    # else:
-    #     return ET.fromstring(f"<root>{llm_response_text}</root>")
-    
 def tool_caller(tools: List, transcript: List[str]):
     openai_client = openai.OpenAI(
         api_key=OPENROUTER_API_KEY,
