@@ -2,6 +2,7 @@ import requests
 from typing import Dict, Optional, List
 from datetime import datetime
 import inspect
+import re
 
 class WeatherTool:
     """
@@ -90,6 +91,26 @@ class WeatherTool:
         """Translate numeric weather code to human-readable description."""
         return self._weather_codes.get(code, "Unknown")
 
+    def _validate_location(self, input_str):
+        """
+        Validates location-related strings, allowing:
+        - Latitude/Longitude (e.g., 40.7128° N, 74.0060° W)
+        - Place names with alphanumeric and spaces
+        - Throws ValueError for invalid formats
+        """
+        # Pattern for latitude/longitude
+        lat_long_pattern = r'^-?\d+\.?\d*°?\s*[NSns]?,?\s*-?\d+\.?\d*°?\s*[EWew]?$'
+        
+        # Pattern for place names (alphanumeric and spaces only)
+        place_pattern = r'^[A-Za-z0-9\s]+$'
+        
+        # Check if input matches any valid pattern
+        if (re.match(lat_long_pattern, input_str) or 
+            re.match(place_pattern, input_str)):
+            return True
+        else:
+            raise ValueError("Invalid format. Input must be a valid latitude/longitude, or contain only alphanumeric characters and spaces(no commas, dashes, etc).")
+
     def _process_weather_data(self, data: Dict) -> Dict:
         """Process weather values to include human-readable descriptions."""
         if 'weatherCode' in data:
@@ -110,9 +131,7 @@ class WeatherTool:
         Args:
             location: Location identifier - can be:
                      - Coordinates (e.g., "42.3478,-71.0466")
-                     - City name (e.g., "new york")
-                     - US zip (e.g., "10001")
-                     - UK postcode (e.g., "SW1")
+                     - City name (e.g., "new york") (only alphabets and spaces allowed)
             units: Unit system ('metric' or 'imperial')
             
         Returns:
@@ -125,6 +144,7 @@ class WeatherTool:
             - weather condition (human-readable)
             Plus location details and timestamp
         """
+        assert self._validate_location(location) is True
         params = {
             'location': location,
             'units': units
@@ -143,12 +163,14 @@ class WeatherTool:
         
         return processed_data
 
-    def get_forecast(self, location: str, timesteps: str = '1h', days: int = 5, units: str = 'metric') -> Dict:
+    def get_forecast(self, location: str, timesteps: str = '12h', days: int = 5, units: str = 'metric') -> Dict:
         """
         Get weather forecast with specified time steps.
         
         Args:
-            location: Location identifier (same formats as get_current_weather)
+            location: Location identifier - can be:
+                     - Coordinates (e.g., "42.3478,-71.0466")
+                     - City name (e.g., "new york") (only alphabets and spaces allowed no special characters)
             timesteps: Time resolution - '1h' for hourly or '1d' for daily
             days: Number of days to forecast:
                   - For hourly: 1-5 days (max 120 hours)
@@ -169,7 +191,8 @@ class WeatherTool:
             
         if not 1 <= days <= 5:
             raise ValueError("Days must be between 1 and 5")
-            
+        
+        location = self._validate_location(location)
         params = {
             'location': location,
             'units': units,
