@@ -86,3 +86,27 @@ class AssistantResponse(BaseModel):
         )
 
 
+class CriticResponse(BaseModel):
+    situation_analysis: str = Field(description="The cirtic's reasoning/analysis of the situation")
+    thought: str = Field(description="The assistant's thought process or reasoning")
+    internal_response: str = Field(description="Response formulated as an internal insight from agent on what it should do next")
+
+
+class ClientType(Enum):
+    CHAT = "chat"
+    VOICE = "voice"
+    TERMINAL = "terminal"
+    USER = "user"
+
+@dataclass
+class ClientRequest:
+    user_id: str
+    client_type: ClientType
+    message: str
+    user_metadata: dict
+
+@dataclass
+class MessageResponse:
+    client_type: ClientType
+    content: str
+    raw_response: str
