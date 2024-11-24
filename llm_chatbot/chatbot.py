@@ -305,9 +305,20 @@ class ChatBot:
         for tool_name in self.functions.keys():
             if tool_name != 'overview':
                 tool_fn = self.functions[tool_name]
-                tools.append((f"{tool_name}: {tool_fn['schema']['function']['description']}\nparameters_schema: {tool_fn['schema']['function']['parameters']}\n\nTool Group Description: {tool_fn['tool_desc']}\n", None))
+                tool_signature = utils.format_function_schema(tool_fn['schema'])
+                tools.append((f"{tool_signature[0]}: {tool_fn['schema']['function']['description']}\n\nTool Group Description: {tool_fn['tool_desc']}\n", None))
         self.tool_rag.bulk_insert(tools)
     
+    async def _get_tool_suggestions(self):
+        transcript_snippet = "\n\n".join([f"{m['role']}: {m['content']}" for m in self.messages[-2:] if m.get('role', 'system') != 'system'])
+        response = await self.get_llm_response(messages=[
+            {"role": "system", "content": TOOL_RAG_QUERY_GENERATOR_PROMPT},
+            {"role": "user", "content": f"<current_conversation_context>{transcript_snippet}</current_conversation_context>"}
+        ], model_name="meta-llama/llama-3.1-8b-instruct")
+        tool_suggestions = self.tool_rag.query(response.choices[0].message.content, top_k=15, min_p=0.2)
+        logger.debug("tool_caller_tool_suggestions(top {top_k}) {message}", top_k=15, message=tool_suggestions)
+        return "\n\n".join([i['content'] for i in tool_suggestions[:5]])
+
     async def _agent_loop(self):
         self_recurse = True
         recursion_counter = 0
@@ -315,16 +326,13 @@ class ChatBot:
         while self_recurse and recursion_counter < self.max_recurse_depth:
             logger.debug("agent loop recursion depth: {count}", count=recursion_counter)
             
-            transcript_snippet = [f"{m['role']}: {m['content']}" for m in self.messages[-3:] if m.get('role', 'system') != 'system']
-            tool_suggestions = self.tool_rag.query("\n".join(transcript_snippet), top_k=15, min_p=0.2)
-            logger.debug("tool_caller_tool_suggestions(top {top_k}) {message}", top_k=15, message=tool_suggestions)
-
-            previous_chat_context = self.conversation_rag.query("\n".join(transcript_snippet), top_k=15, min_p=0.2)
+            tool_suggestions_str = await self._get_tool_suggestions()
+            previous_chat_context = self.conversation_rag.query("\n".join([""]), top_k=15, min_p=0.2)
             logger.debug("previous_chat_context {context}", context=previous_chat_context)
             
             self.rolling_memory()
             try:
-                parsed_response: AssistantResponse = await self.execute(tool_suggestions[:5], previous_chat_context[:5])
+                parsed_response: AssistantResponse = await self.execute(tool_suggestions_str, [])
             except Exception as e:
                 logger.debug("failed parsing assistant response {error}", error=e)
                 parsed_response: AssistantResponse = AssistantResponse.model_validate_json(json.dumps({
@@ -339,6 +347,7 @@ class ChatBot:
             recursion_counter += 1
             llm_thought = f"<thought>{parsed_response.thought}</thought>"
 
+            needs_critic_review = False
             if parsed_response.response.type == ResponseType.TOOL_USE:
                 tool_calls = parsed_response.response.content
                 if isinstance(parsed_response.response.content, str):
@@ -351,6 +360,8 @@ class ChatBot:
                     for tool_call in tool_calls:
                         try:
                             fn_success, fn_response = await self._execute_function_call(tool_call)
+                            if fn_success is False:
+                                needs_critic_review = True
                             tool_call_responses.append(fn_response)
                         except Exception as e:
                             tool_call_responses.append(f"command: {tool_call} failed. Error: {e}")
@@ -368,8 +379,8 @@ class ChatBot:
             if parsed_response.response.type  == ResponseType.INTERNAL_RESPONSE:
                 response = {"role": "assistant", "content": f"{llm_thought}\n<internal_response>{parsed_response.response.content}</internal_response>"}
 
-            if (response in self.messages[-5:]):
-                response = self._get_critic_feedback()
+            # if (response in self.messages[-3:]) or needs_critic_review:
+            #     response = await self._get_critic_feedback()
             self._add_message(response)
             logger.info("Assistant_response {response}", response=response)
 
@@ -523,8 +534,8 @@ class ChatBot:
     
     async def _get_critic_feedback(self):
         logger.debug("getting critic feedback for the current conversation")
-        agent_transcript = f"system: {self.system}\n"
-        agent_transcript += "\n".join([f"{m['role']}: {m['content']}" for m in self.messages[-5:] if m.get('role', 'system') != 'system'])
+        agent_transcript = f"system: {self.system}\n\n...[possible conversation turns]...\n\n"
+        agent_transcript += "\n".join([f"{m['role']}: {m['content']}" for m in self.messages[-3:] if m.get('role', 'system') != 'system'])
         response_formatter_messages = [ 
             {"role": "system", "content": CRITIC_PROMPT_V1},
             {"role": "user", "content": f"<current_conversation_transcript>\n{agent_transcript}\n<current_conversation_transcript>"}
@@ -538,9 +549,12 @@ class ChatBot:
                 }
             },
         )
-        logger.debug("response_text_to_json {reformatted_text}", reformatted_text=response.choices[0].message.content)
-        ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
-        return ass_resp
+        logger.debug("critic feedback for bot: {reformatted_text}", reformatted_text=response.choices[0].message.content)
+        ass_resp = CriticResponse.model_validate_json(response.choices[0].message.content)
+        return {
+            "role": "assistant",
+            "content": f"<thought>{ass_resp.thought}</thought>\n<internal_response>{ass_resp.internal_response}</internal_response>"
+        }
 
     async def _parse_results(self, response_text: str):
         assistant_response = await self._get_bot_response_json(response_text)
@@ -585,7 +599,7 @@ class ChatBot:
         ]
         response = await self.get_llm_response(
             messages=response_formatter_messages,
-            model_name="google/gemini-flash-1.5-8b",
+            model_name="openai/gpt-4o-mini",
             extra_body={"response_format": {"type": "json_object"}}
         )
         logger.debug("context_filtered_tool_result {reformatted_tool_result}", reformatted_tool_result=response.choices[0].message.content)
@@ -594,9 +608,9 @@ class ChatBot:
 
     async def _execute_function_call(self, tool_call: ToolParameter):
         logger.info("Executing_function_call {tool_call}", tool_call=tool_call)
+        success = False
         if tool_call.name is not None and tool_call.name in self.functions.keys():
             function_to_call = self.functions.get(tool_call.name, {}).get('function', None)
-            success = False
 
             logger.debug("Function_call_details {name} {args}", name=tool_call.name, args=tool_call.parameters)
             try:
@@ -620,7 +634,7 @@ class ChatBot:
             return success, results_dict
         else:
             logger.warning("Invalid_function_name {name}", name=tool_call.name)
-            return f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
+            return success, f'{{"name": "{tool_call.name}", "content": Invalid function name. Either None or not in the list of supported functions.}}'
 
     async def _get_chat_notes(self, message_id: str):
 
@@ -723,9 +737,6 @@ class ChatBot:
 ## Current Realtime Info
 Datetime: {datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")}
 
-## Available Tools Overview
-{self.functions.get('overview', 'Overview not found.')}
-
 ## Tool Suggestions
 {tool_suggestions}
 
@@ -747,6 +758,7 @@ Preferences:
                 self.system['content'] = regex.sub(current_info, self.system['content'])
             else:
                 self.system['content'] = self.system['content'] + '\n' + current_info
+            self.messages[0] = self.system
         
             logger.info("Executing_LLM_call {message_count}", message_count=len(self.messages))
             completion = await self.get_llm_response(messages=self.messages, model_name=self.model)
