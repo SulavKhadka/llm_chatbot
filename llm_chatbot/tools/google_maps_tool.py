@@ -7,6 +7,7 @@ import requests
 from dataclasses import dataclass
 import inspect
 from functools import lru_cache
+from chatbot_data_models import ToolState, ToolMethodStatus, ToolStatus
 
 class TransitVehicleType(str, Enum):
     """Supported transit vehicle types"""
@@ -968,3 +969,86 @@ class GoogleMapsRouter:
             Location object with coordinates
         """
         pass
+
+    def _get_tool_status(self) -> Dict[str, bool]:
+        """Check operational status of all public tool methods."""
+        
+        tool_status = ToolStatus(
+            status=ToolState.UNOPERATIONAL,
+            methods={}
+        )
+        
+        # Test location for health checks
+        test_origin = {"lat": 37.7749, "lng": -122.4194}  # San Francisco
+        test_dest = {"lat": 37.3382, "lng": -121.8863}    # San Jose
+        test_time = (datetime.now(pytz.utc) + timedelta(minutes=30)).isoformat()
+        
+        for tool_method in self._get_available_methods():
+            method_health = ToolMethodStatus(
+                status=ToolState.UNOPERATIONAL,
+                error=""
+            )
+            
+            try:
+                if tool_method['name'] == "get_transit_route":
+                    response = self.get_transit_route(
+                        origin=test_origin,
+                        destination=test_dest,
+                        departure_time=test_time
+                    )
+                    
+                elif tool_method['name'] == "get_driving_route":
+                    response = self.get_driving_route(
+                        origin=test_origin,
+                        destination=test_dest,
+                        departure_time=test_time.isoformat()
+                    )
+                    
+                elif tool_method['name'] == "get_multi_modal_route":
+                    # Skip testing NotImplemented methods
+                    if "NotImplementedError" in str(inspect.getsource(tool_method['func'])):
+                        method_health.status = False
+                        method_health.error = "Method not implemented"
+                        tool_status.methods[tool_method['name']] = method_health
+                        continue
+                        
+                    response = self.get_multi_modal_route(
+                        origin=test_origin,
+                        destination=test_dest,
+                        mode_preference=[TravelMode.TRANSIT, TravelMode.WALK],
+                        departure_time=test_time
+                    )
+                
+                # Check if response contains expected data
+                if isinstance(response, dict):
+                    if 'routes' in response:
+                        method_health.status = True
+                    else:
+                        method_health.status = False
+                        method_health.error = "Invalid response format - missing routes"
+                else:
+                    method_health.status = False
+                    method_health.error = "Invalid response type"
+                    
+            except NotImplementedError as e:
+                method_health.status = False
+                method_health.error = "Method not implemented"
+            except requests.exceptions.RequestException as e:
+                method_health.status = False
+                method_health.error = f"API request failed: {str(e)}"
+            except Exception as e:
+                method_health.status = False
+                method_health.error = str(e)
+                
+            tool_status.methods[tool_method['name']] = method_health
+        
+        # Determine overall tool status based on method health
+        num_healthy_methods = sum([m.status for m in tool_status.methods.values()])
+        if num_healthy_methods <= 0:
+            tool_status.status = ToolState.UNOPERATIONAL
+        elif num_healthy_methods < len(tool_status.methods):
+            tool_status.status = ToolState.PARTIALLY_OPERATIONAL
+        elif num_healthy_methods == len(tool_status.methods):
+            tool_status.status = ToolState.FULLY_OPERATIONAL
+        
+        return tool_status
