@@ -5,7 +5,7 @@ from fastapi.requests import Request
 from uuid import uuid4
 import xml.etree.ElementTree as ET
 from secret_keys import POSTGRES_DB_PASSWORD
-from prompts import SYS_PROMPT_V3, SYS_PROMPT_MD_TOP, SYS_PROMPT_MD_BOTTOM
+from prompts import SYS_PROMPT_V3, SYS_PROMPT_V4, SYS_PROMPT_MD_TOP, SYS_PROMPT_MD_BOTTOM
 import psycopg2
 from datetime import datetime, timedelta
 import pytz
@@ -171,7 +171,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str, force_new_sessi
 async def process_message(user_id: str, session_id: str, client_request: ClientRequest):
     # Get or create chatbot session
     chatbot = get_session(user_id=user_id)
-    response = chatbot(client_request.message)
+    response = await chatbot(client_request.message)
     sanitized_response = utils.sanitize_inner_content(response)
     root = ET.fromstring(f"<root>{sanitized_response}</root>")
     
@@ -183,11 +183,11 @@ async def process_message(user_id: str, session_id: str, client_request: ClientR
     if user_id in manager.active_connections:
         await manager.send_message(
             user_id,
-            MessageResponse(
+            asdict(MessageResponse(
                 client_type=client_request.client_type,
                 content=response_text,
                 raw_response=sanitized_response
-            )
+            ))
         )
     
     return response_text

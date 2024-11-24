@@ -165,14 +165,14 @@ if __name__ == "__main__":
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    client = ChatbotClient(USER_ID, f"ws://localhost:8000/{USER_ID}/ws?force_new_session=true")
+    client = ChatbotClient(USER_ID, f"ws://localhost:8000/{USER_ID}/ws")
     
     # Voice handler
     segmenter = SpeechSegmenter(
         silence_threshold=0.013,  # Adjust based on your microphone and environment
         silence_duration=2.0,  # 2 seconds of silence to mark end of speech
         sample_rate=16000,  # Match Whisper's expected sample rate
-        chunk_duration=2.0,  # Process in 0.5 second chunks
+        stt_chunk_duration=2.0,  # Process in 0.5 second chunks
         tts_ws_url="ws://0.0.0.0:8880/tts",
     )
     client.register_handler(ClientType.VOICE, segmenter.handle_bot_response)

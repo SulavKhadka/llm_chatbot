@@ -16,7 +16,9 @@ from queue import Queue, Empty
 import asyncio
 import copy
 import pvporcupine
-from secret_keys import PORCUPINE_API_KEY
+from secret_keys import PORCUPINE_API_KEY, ELEVENLABS_API_KEY
+from elevenlabs import play
+from elevenlabs.client import ElevenLabs
 
 class SpeechSegmenter:
     def __init__(
@@ -24,7 +26,7 @@ class SpeechSegmenter:
         silence_threshold=0.01,
         silence_duration=1.0,
         sample_rate=16000,
-        chunk_duration=1.0,
+        stt_chunk_duration=1.0,
         tts_ws_url="ws://0.0.0.0:8880/tts",
     ):
         """
@@ -34,12 +36,13 @@ class SpeechSegmenter:
             silence_threshold: RMS threshold below which audio is considered silence
             silence_duration: Duration of silence (in seconds) to mark end of speech
             sample_rate: Audio sample rate in Hz
-            chunk_duration: Duration of each audio chunk in seconds
+            stt_chunk_duration: Duration of each audio chunk in seconds
         """
         self.silence_threshold = silence_threshold
         self.silence_duration = silence_duration
         self.sample_rate = sample_rate
-        self.chunk_duration = chunk_duration
+        self.chunk_duration = 0.2
+        self.stt_chunk_duration = stt_chunk_duration 
 
         # Initialize VAD model
         self.vad_model, self.vad_utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
@@ -55,13 +58,13 @@ class SpeechSegmenter:
         self.online = OnlineASRProcessor(self.asr)
 
         # Setup audio stream
-        self.chunk_size = int(sample_rate * chunk_duration)
+        self.wakeword_chunk_size = int(sample_rate * self.chunk_duration)
         print(sd.query_devices())
         self.stream = sd.InputStream(
             samplerate=sample_rate,
             channels=1,
             dtype=np.float32,
-            blocksize=self.chunk_size,
+            blocksize=self.wakeword_chunk_size,
         )
 
         # State tracking
@@ -72,6 +75,9 @@ class SpeechSegmenter:
 
         # TTS engine
         self.tts_engine = TTSClient(tts_ws_url)
+        self.elevenlabs_client = ElevenLabs(
+            api_key=ELEVENLABS_API_KEY,
+        )
 
         self.audio_queue = Queue()
         self._audio_thread = None
@@ -90,7 +96,7 @@ class SpeechSegmenter:
             samplerate=self.sample_rate,
             channels=1,
             dtype=np.float32,
-            blocksize=self.chunk_size,
+            blocksize=self.wakeword_chunk_size,
             callback=self._audio_callback
         )
         self.stream.start()
@@ -102,25 +108,25 @@ class SpeechSegmenter:
             self.stream.stop()
             self.stream.close()
 
-    def is_silence(self, audio_chunk):
+    def is_silence(self, curr_audio_chunk, stt_audio_chunk):
         """Check if an audio chunk is silence based on RMS value"""        
         vad_confidences = []
-        for i in range(0, len(audio_chunk), self.vad_chunk_size):
+        for i in range(0, len(curr_audio_chunk), self.vad_chunk_size):
 
             # some weirdness but its to make sure the vad_chunk is always some specified size.
-            if i+self.vad_chunk_size > len(audio_chunk):
+            if i+self.vad_chunk_size > len(curr_audio_chunk):
                 vad_chunk = np.zeros(self.vad_chunk_size, dtype=np.float32)
-                vad_chunk[:len(audio_chunk)-i] = audio_chunk[i:i+self.vad_chunk_size]
+                vad_chunk[:len(curr_audio_chunk)-i] = curr_audio_chunk[i:i+self.vad_chunk_size]
             else:
-                vad_chunk = audio_chunk[i:i+self.vad_chunk_size]
+                vad_chunk = curr_audio_chunk[i:i+self.vad_chunk_size]
 
             if self.wake_word_engine.process((vad_chunk * 32767).astype(np.int16)) >= 0:
                 if not self.is_speaking:
                     sd.play(self.wake_word_sound[0], samplerate=self.wake_word_sound[1], blocking=True)
 
-                    new_audio_chunk = np.zeros(len(audio_chunk), dtype=np.float32)
-                    new_audio_chunk[i: len(audio_chunk)] = audio_chunk[i: len(audio_chunk)]
-                    audio_chunk = copy.deepcopy(new_audio_chunk)
+                    new_audio_chunk = np.zeros(len(curr_audio_chunk), dtype=np.float32)
+                    new_audio_chunk[i: len(curr_audio_chunk)] = curr_audio_chunk[i: len(curr_audio_chunk)]
+                    stt_audio_chunk[:] = copy.deepcopy(new_audio_chunk)
                     self.all_segments = []
 
                     self.is_speaking = True
@@ -140,15 +146,21 @@ class SpeechSegmenter:
 
     async def handle_bot_response(self, response: MessageResponse):
         print(f"ASSISTANT: {response}")
-        self.tts_engine.stop_playback()
-        for segment in utils.split_markdown_text(response.content):
-            await self.tts_engine.stream_text(segment)
+        el_audio = self.elevenlabs_client.generate(
+            text=response.content,
+            voice="Brian",
+            model="eleven_multilingual_v2"
+        )
+        play(el_audio)
+        # self.tts_engine.stop_playback()
+        # for segment in utils.split_markdown_text(response.content):
+        #     await self.tts_engine.stream_text(segment)
 
     async def process_audio(self, user_queue: Queue):
         """Process incoming audio asynchronously"""
         print("Starting audio processing...")
         self.start_audio_stream()
-        
+        stt_audio_chunk = []
         try:
             while not self._stop_audio:
                 # Get audio data from the queue without blocking the event loop
@@ -164,12 +176,13 @@ class SpeechSegmenter:
                     continue
 
                 # Process audio chunk
-                audio_chunk = audio_data.flatten()
+                micro_audio_chunk = audio_data.flatten()
+                stt_audio_chunk.extend(micro_audio_chunk)
                 current_time = time.time()
 
                 # Check for silence
                 if self.tts_engine.is_playing is False:
-                    if self.is_silence(audio_chunk):
+                    if self.is_silence(micro_audio_chunk, stt_audio_chunk):
                         if (self.is_speaking and 
                             (current_time - self.last_speech_time) > self.silence_duration):
                             
@@ -194,6 +207,7 @@ class SpeechSegmenter:
                             await user_queue.put(message)
                             print("Message sent to queue")
                             
+                            stt_audio_chunk = []
                             self.all_segments = []
                             self.online.init()
                     else:
@@ -201,13 +215,14 @@ class SpeechSegmenter:
                         self.is_speaking = True
 
                 # Process with Whisper if in speech segment
-                if self.is_speaking:
-                    self.online.insert_audio_chunk(audio_chunk)
+                if self.is_speaking and len(stt_audio_chunk) > int(self.sample_rate * self.stt_chunk_duration):
+                    self.online.insert_audio_chunk(np.array(stt_audio_chunk))
                     output = self.online.process_iter()
                     if output[2]:
                         self.current_segment = output
                         self.all_segments.append(output[2])
                         print(f"Current segment: {output[2]}")
+                    stt_audio_chunk = []
 
                 # Give other tasks a chance to run
                 await asyncio.sleep(0)
@@ -228,7 +243,7 @@ async def main():
         silence_threshold=0.013,  # Adjust based on your microphone and environment
         silence_duration=2.0,  # 2 seconds of silence to mark end of speech
         sample_rate=16000,  # Match Whisper's expected sample rate
-        chunk_duration=2.0,  # Process in 0.5 second chunks
+        stt_chunk_duration=2.0,  # Process in 0.5 second chunks
     )
 
     # Start processing

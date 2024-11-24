@@ -6,6 +6,13 @@ import logfire
 import sys
 import requests
 from secret_keys import POSTGRES_DB_PASSWORD
+from enum import Enum
+
+class ClientType(Enum):
+    CHAT = "chat"
+    VOICE = "voice"
+    TERMINAL = "terminal"
+    USER = "user"
 
 # --- Notifier Service Imports ---
 from fastapi import FastAPI, HTTPException
@@ -84,7 +91,7 @@ async def send_text_notification(
             f"{api_url}/{user_id}/{chat_id}/message",
             json={
                 "user_id": user_id,
-                "client_type": "notifier",
+                "client_type": ClientType.VOICE.value,
                 "message": message,
                 "user_metadata": metadata,
             },

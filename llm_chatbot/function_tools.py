@@ -18,7 +18,8 @@ from secret_keys import (
     HUE_USER,
     HUE_BRIDGE_IP,
     BRAVE_SEARCH_API_KEY,
-    OPENROUTER_API_KEY
+    OPENROUTER_API_KEY,
+    GOOGLE_MAPS_API_KEY
 )
 from llm_chatbot.tools.python_interpreter import UVPythonShellManager
 from llm_chatbot.tools.spotify_control import SpotifyTool
@@ -27,8 +28,10 @@ from llm_chatbot.tools.notifier_tool import NotifierTool
 from llm_chatbot.tools.google_calendar_tool import GoogleCalendarTool
 from llm_chatbot.tools.gmail_tool import GmailTool
 from llm_chatbot.tools.yt_dlp_tool import YtDLPTool
-from llm_chatbot.tools.weather_tool_old import WeatherTool
+from llm_chatbot.tools.weather_tool import WeatherTool
 from llm_chatbot.tools.web_search import BraveSearchTool
+from llm_chatbot.tools.google_maps_tool import GoogleMapsRouter
+
 import numpy as np
 from PIL import Image
 import os
@@ -282,7 +285,7 @@ Your output should always be valid JSON in this format:
         base_url="https://openrouter.ai/api/v1"
     )
     prompt_completion = openai_client.completions.create(
-        model="google/gemini-flash-1.5-8b",
+        model="perplexity/llama-3.1-sonar-small-128k-chat",
         prompt=prompt,
         max_tokens=4096,
         temperature=0.1
@@ -303,11 +306,12 @@ def get_tools():
 
     weather_tool = WeatherTool(api_key=TOMORROW_IO_WEATHER_API_TOKEN)
     yt_dlp_tool = YtDLPTool(output_path="./yt_dlp_output/")
-    gmail_tool = GmailTool(credentials_path="./llm_chatbot/tools/gmail_client_creds.json", token_path='./llm_chatbot/tools/gmail_client_token.json')
-    calendar_tool = GoogleCalendarTool(credentials_path="./llm_chatbot/tools/google_calendar_creds.json", token_path='./llm_chatbot/tools/google_calendar_token.json')
+    gmail_tool = GmailTool(credentials_path="./tools/gmail_client_creds.json", token_path='./tools/gmail_client_token.json')
+    calendar_tool = GoogleCalendarTool(credentials_path="./tools/google_calendar_creds.json", token_path='./tools/google_calendar_token.json')
     spotify_tool = SpotifyTool(client_id=SPOTIFY_CLIENT_ID, client_secret=SPOTIFY_CLIENT_SECRET)
     hue_tool = PhilipsHueTool(bridge_ip=HUE_BRIDGE_IP, api_key=HUE_USER)
     web_search_tool = BraveSearchTool(api_key=BRAVE_SEARCH_API_KEY)
+    maps_tool = GoogleMapsRouter(api_key=GOOGLE_MAPS_API_KEY)
     
     tools = [
         take_screenshots,
@@ -321,11 +325,12 @@ def get_tools():
         calendar_tool,
         yt_dlp_tool,
         weather_tool,
-        web_search_tool
+        web_search_tool,
+        maps_tool
     ]
 
     tool_dict = {}
-    tool_dict["overview"] = get_tools_overview(tools)
+    tool_dict["overview"] = "" # get_tools_overview(tools)
 
     for bot_tool in tools:
         if isinstance(bot_tool, StructuredTool):

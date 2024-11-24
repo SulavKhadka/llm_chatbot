@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 import loguru
 import re
+from chatbot_data_models import ToolStatus, ToolMethodStatus, ToolState
+
 
 class NotificationTask(BaseModel):
     """Data model for notification tasks."""
@@ -15,6 +17,7 @@ class NotificationTask(BaseModel):
     user_id: str
     chat_id: str
     metadata: Optional[Dict] = Field(default={}, description="Additional task metadata")
+
 
 class NotifierTool:
     """Tool for scheduling and managing time-based notifications and reminders.
@@ -41,6 +44,59 @@ class NotifierTool:
                 })
         return sorted(methods, key=lambda x: x["name"])
     
+    def _get_tool_status(self) -> Dict[str, bool]:
+        
+        tool_status = ToolStatus(
+            status=ToolState.UNOPERATIONAL,
+            methods={}
+        )
+        
+        for tool_method in self._get_available_methods():
+            method_health = ToolMethodStatus(
+                status = ToolState.UNOPERATIONAL,
+                error = ""
+            )
+
+            job_id = None
+            message = "health check ping: schedule_reminder"
+            trigger_time = (datetime.now() + timedelta(minutes=30)).isoformat()
+            user_id = "health_check_user_NotifierTool"
+            try:
+                if tool_method['name'] == "schedule_reminder":
+                        response = self.schedule_reminder(message=message, trigger_time=trigger_time, user_id=user_id)
+                        job_id = response.get('job_id', None)
+                
+                elif tool_method['name'] == "cancel_reminder":
+                        if job_id is None:
+                            job_resp = self.schedule_reminder(message=message, trigger_time=trigger_time, user_id=user_id)
+                            if job_resp.get('success', False):
+                                job_id = job_resp['job_id']
+                        response = self.cancel_reminder(job_id=job_id)
+
+                elif tool_method['name'] == "list_reminders":
+                        response = self.list_reminders(user_id=user_id)
+                
+                method_health.status = response.get('success', False)
+                if method_health.status is False:
+                    method_health.error = response.get('message', '')
+
+            except Exception as e:
+                method_health.status = False
+                method_health.error = e
+            
+            tool_status.methods[tool_method['name']] = method_health
+        
+        num_healthy_tool_methods = sum([m.status for m in tool_status.methods.values()])
+        if num_healthy_tool_methods <= 0:
+            tool_status.status = ToolState.UNOPERATIONAL
+        elif num_healthy_tool_methods < len(tool_status.methods):
+            tool_status.status = ToolState.PARTIALLY_OPERATIONAL
+        elif num_healthy_tool_methods == len(tool_status.methods):
+            tool_status.status = ToolState.FULLY_OPERATIONAL
+        
+        return tool_status
+
+
     def _parse_time_input(self, time_input: str) -> datetime:
         """Convert time input to datetime object.
         
@@ -89,7 +145,7 @@ class NotifierTool:
 
         Returns:
             str: JSON response with fields:
-            - status: "success" or "error"
+            - success: True or False
             - job_id: Scheduled reminder ID (on success)
             - scheduled_time: ISO datetime for reminder
             - message: Success confirmation or error details
@@ -121,19 +177,19 @@ class NotifierTool:
                            id=response_data["job_id"], 
                            time=parsed_time.isoformat())
             
-            return json.dumps({
-                "status": "success",
+            return {
+                "success": True,
                 "job_id": response_data["job_id"],
                 "scheduled_time": parsed_time.isoformat(),
                 "message": message
-            })
+            }
             
         except Exception as e:
             self.logger.error("Schedule failed: {error}", error=str(e))
-            return json.dumps({
-                "status": "error",
+            return {
+                "success": False,
                 "message": str(e)
-            })
+            }
 
     def cancel_reminder(self, job_id: str) -> str:
         """Cancel a scheduled reminder using its ID.
@@ -143,7 +199,7 @@ class NotifierTool:
 
         Returns:
             str: JSON response with fields:
-            - status: "success" or "error"
+            - success: True or False
             - message: Confirmation or error details
         """
         try:
@@ -155,23 +211,23 @@ class NotifierTool:
             response.raise_for_status()
             
             self.logger.info("Cancelled reminder {id}", id=job_id)
-            return json.dumps({
-                "status": "success",
+            return {
+                "success": True,
                 "message": f"Reminder {job_id} cancelled successfully"
-            })
+            }
             
         except requests.exceptions.HTTPError as e:
             self.logger.error("Cancel failed - reminder {id} not found: {e}", id=job_id, e=str(e))
-            return json.dumps({
-                "status": "error",
+            return {
+                "success": False,
                 "message": f"Reminder not found: {str(e)}"
-            })
+            }
         except Exception as e:
             self.logger.error("Cancel failed: {error}", error=str(e))
-            return json.dumps({
-                "status": "error",
+            return {
+                "success": False,
                 "message": str(e)
-            })
+            }
 
     def list_reminders(self, user_id: Optional[str] = None) -> str:
         """List pending reminders for a user or all users.
@@ -181,7 +237,7 @@ class NotifierTool:
 
         Returns:
             str: JSON response with fields:
-            - status: "success" or "error"
+            - success: True or False
             - count: Number of reminders found
             - reminders: List of reminder details (on success)
             - message: Error details (on failure)
@@ -200,15 +256,15 @@ class NotifierTool:
                            n=len(reminders), 
                            u=user_id if user_id else "all users")
             
-            return json.dumps({
-                "status": "success",
+            return {
+                "success": True,
                 "count": len(reminders),
                 "reminders": reminders
-            })
+            }
             
         except Exception as e:
             self.logger.error("List failed: {error}", error=str(e))
-            return json.dumps({
-                "status": "error",
+            return {
+                "success": False,
                 "message": str(e)
-            })
+            }
