@@ -16,16 +16,16 @@ from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import re
 from openai.types.chat.chat_completion import ChatCompletion
 from uuid import uuid4
-import requests
+import aiohttp
 from outlines import models, generate
 from outlines.models.openai import OpenAIConfig
 
 from llm_chatbot import function_tools, utils
 from llm_chatbot.rag_db import VectorSearch
 from llm_chatbot.tools.python_sandbox import PythonSandbox
-from llm_chatbot.chatbot_data_models import AssistantResponse, ResponseType, ToolParameter
-from secret_keys import TOGETHER_AI_TOKEN, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY, USER_INFO
-from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, BOT_RESPONSE_FORMATTER_PROMPT, CONTEXT_FILTERED_TOOL_RESULT_PROMPT, CRITIC_PROMPT_V1
+from llm_chatbot.chatbot_data_models import AssistantResponse, CriticResponse, ResponseType, ToolParameter
+from secret_keys import FIREWORKS_API_KEY, POSTGRES_DB_PASSWORD, OPENROUTER_API_KEY, USER_INFO
+from prompts import CHAT_NOTES_PROMPT, CHAT_SESSION_NOTES_PROMPT, BOT_RESPONSE_FORMATTER_PROMPT, CONTEXT_FILTERED_TOOL_RESULT_PROMPT, CRITIC_PROMPT_V1, TOOL_RAG_QUERY_GENERATOR_PROMPT
 
 # Configure logfire
 logfire.configure(scrubbing=False)
@@ -503,21 +503,21 @@ class ChatBot:
         return added_message[0]
 
     async def _get_bot_response_json(self, response_text: str):
-        logger.debug("response_text_to_json: {response_text}", response_text=response_text)
+        logger.debug("structuring bot response into JSON: {response_text}", response_text=response_text)
         response_formatter_messages = [
             {"role": "system", "content": BOT_RESPONSE_FORMATTER_PROMPT},
             {"role": "user", "content": response_text}
         ]
-        response = await self.get_llm_response(
+        response = await self.get_fireworks_llm_response(
             messages=response_formatter_messages,
-            model_name="google/gemini-flash-1.5-8b",
+            model_name="accounts/fireworks/models/llama-v3p1-8b-instruct",
             extra_body={
                 "response_format": {
                     "type": "json_object",
                 }
             },
         )
-        logger.debug("response_text_to_json {reformatted_text}", reformatted_text=response.choices[0].message.content)
+        logger.debug("JSON bot response: {reformatted_text}", reformatted_text=response.choices[0].message.content)
         ass_resp = AssistantResponse.model_validate_json(response.choices[0].message.content)
         return ass_resp
     
@@ -821,3 +821,31 @@ Preferences:
                 raise(e)
         logger.debug("Received_response_from_LLM {completion}", completion=chat_completion.model_dump())
         return chat_completion
+
+    async def get_fireworks_llm_response(self, messages: List[dict], model_name: str = "accounts/fireworks/models/llama-v3p1-8b-instruct", extra_body: Optional[dict] = None):
+        url = "https://api.fireworks.ai/inference/v1/chat/completions"
+        payload = {
+        "model": model_name,
+        "max_tokens": 4096,
+        "top_p": 1,
+        "top_k": 40,
+        "presence_penalty": 0,
+        "frequency_penalty": 0,
+        "temperature": 0.6,
+        "messages": messages,
+        "response_format": extra_body["response_format"]
+        }
+        headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {FIREWORKS_API_KEY}"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            fir_resp = await session.post(url, headers=headers, json=payload)
+            try:
+                content = await fir_resp.json()
+                return ChatCompletion.model_validate(content)
+            except Exception as e:
+                logger.error("failed to get fireworks llm response with error: {e}", e=e)
+                raise(e)
